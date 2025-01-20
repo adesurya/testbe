@@ -2,58 +2,50 @@
 const WhatsappService = require('../services/whatsappService');
 const WhatsappSession = require('../models/WhatsappSession');
 
+
 class WhatsappController {
     async bindWhatsapp(req, res) {
         console.log('bindWhatsapp method called', req.body);
         try {
-            const { userId, phoneNumber } = req.body;
+            const userId = req.user.id; // Get userId from authenticated user
+            const { phoneNumber } = req.body;
             
-            if (!userId || !phoneNumber) {
-                console.log('Missing required fields');
+            if (!phoneNumber) {
                 return res.status(400).json({ 
-                    error: 'userId and phoneNumber are required' 
+                    error: 'phoneNumber is required' 
                 });
             }
     
-            // Tambah timeout promise
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('QR generation timeout')), 60000);
-            });
+            // Normalize userId to string format expected by database
+            const normalizedUserId = userId.toString();
+            
+            console.log('Creating WhatsApp session for user:', normalizedUserId);
+            
+            // Create session in database first
+            await WhatsappSession.create(normalizedUserId, phoneNumber);
     
-            // Race antara generate QR dan timeout
-            const result = await Promise.race([
-                WhatsappService.initializeSession(userId, phoneNumber),
-                timeoutPromise
-            ]);
-    
-            console.log('Creating WhatsApp session in database...');
-            await WhatsappSession.create(userId, phoneNumber);
-    
-            console.log('Sending QR code response...');
+            // Then initialize WhatsApp client
+            const result = await WhatsappService.initializeSession(normalizedUserId, phoneNumber);
+            
             res.json(result);
         } catch (error) {
             console.error('Error in bindWhatsapp:', error);
             res.status(500).json({ 
-                error: error.message === 'QR generation timeout' ? 
-                    'QR code generation timed out. Please try again.' : 
-                    error.message,
-                stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+                error: error.message || 'Failed to bind WhatsApp session'
             });
         }
     }
 
     async getActiveSessions(req, res) {
-        console.log('getActiveSessions method called', req.params);
         try {
-            const { userId } = req.params;
+            const userId = req.user.id; // Get userId from authenticated user
             
-            if (!userId) {
-                return res.status(400).json({ 
-                    error: 'userId is required' 
-                });
-            }
-
-            const sessions = await WhatsappSession.findActiveSessions(userId);
+            // Normalize userId to string format
+            const normalizedUserId = userId.toString();
+            
+            console.log('Getting active sessions for user:', normalizedUserId);
+            
+            const sessions = await WhatsappSession.findActiveSessions(normalizedUserId);
             res.json(sessions);
         } catch (error) {
             console.error('Error in getActiveSessions:', error);

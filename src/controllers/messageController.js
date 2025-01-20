@@ -5,6 +5,7 @@ const WhatsappSession = require('../models/WhatsappSession');
 const pool = require('../config/database');
 const Metrics = require('../models/Metrics');
 
+
 class MessageController {
 
     constructor() {
@@ -13,6 +14,8 @@ class MessageController {
         this.sendBulkMessages = this.sendBulkMessages.bind(this);
         this.getBulkStatus = this.getBulkStatus.bind(this);
         this.processBulkMessages = this.processBulkMessages.bind(this);
+        this.getFormats = this.getFormats.bind(this);
+
     }
 
 
@@ -66,7 +69,7 @@ class MessageController {
         try {
             const { targetNumber, message, imagePath, delay } = req.body;
             const userId = req.user.id;
-
+    
             console.log('Checking plan for user:', userId);
             const activePlan = await this.checkUserPlan(userId);
             if (!activePlan) {
@@ -74,7 +77,7 @@ class MessageController {
                     error: 'No active plan or insufficient messages remaining'
                 });
             }
-
+    
             console.log('Getting active WhatsApp sessions');
             const activeSessions = await WhatsappService.getAllActiveSessions(userId);
             if (!activeSessions || activeSessions.length === 0) {
@@ -82,11 +85,23 @@ class MessageController {
                     error: 'No active WhatsApp sessions'
                 });
             }
-
+    
             // Select random session
             const session = activeSessions[Math.floor(Math.random() * activeSessions.length)];
             console.log('Selected session:', session.phone_number);
-
+    
+            // Create message record first
+            const messageId = await Message.create({
+                userId: userId,
+                whatsappSessionId: session.id,
+                targetNumber: targetNumber,
+                message: message,
+                imagePath: imagePath,
+                status: 'pending'
+            });
+    
+            console.log('Created message record:', messageId);
+    
             try {
                 await WhatsappService.sendMessage(
                     session.phone_number,
@@ -95,16 +110,25 @@ class MessageController {
                     imagePath,
                     delay || 0
                 );
-
+    
+                // Update message status to sent
+                await Message.updateStatus(messageId, 'sent');
+                console.log('Message sent successfully, status updated');
+    
                 // Record success metrics
                 await Metrics.recordMessageSent(userId, session.id);
-
+    
                 res.json({
                     message: 'Message sent successfully',
+                    messageId: messageId,
                     sessionUsed: session.phone_number,
                     messagesRemaining: activePlan.messages_remaining - 1
                 });
             } catch (error) {
+                // Update message status to failed
+                await Message.updateStatus(messageId, 'failed');
+                console.log('Message failed, status updated');
+    
                 // Record failed metrics
                 await Metrics.recordMessageFailed(userId, session.id);
                 throw error;
@@ -283,6 +307,9 @@ class MessageController {
         let currentSessionIndex = 0;
         let failedNumbers = [];
     
+        const formattedMessage = MessageFormatter.formatMessage(message);
+
+
         for (let i = 0; i < targetNumbers.length; i++) {
             const targetNumber = targetNumbers[i];
             let sent = false;
@@ -306,7 +333,7 @@ class MessageController {
                     await WhatsappService.sendMessage(
                         session.phone_number,
                         targetNumber,
-                        message,
+                        formattedMessage,
                         imagePath,
                         0 // No additional delay needed here
                     );
@@ -465,7 +492,93 @@ class MessageController {
             connection.release();
         }
     }
+    async getFormats(req, res) {
+        try {
+            const formats = [
+                {
+                    formatType: 'bold',
+                    syntax: '**text**',
+                    example: '**Important Message**',
+                    result: '*Important Message*'
+                },
+                {
+                    formatType: 'italic',
+                    syntax: '__text__',
+                    example: '__Special Note__',
+                    result: '_Special Note_'
+                },
+                {
+                    formatType: 'strikethrough',
+                    syntax: '~~text~~',
+                    example: '~~Old Price~~',
+                    result: '~Old Price~'
+                },
+                {
+                    formatType: 'monospace',
+                    syntax: '```text```',
+                    example: '```Code Block```',
+                    result: '```Code Block```'
+                },
+                {
+                    formatType: 'emoji',
+                    syntax: ':emoji_name:',
+                    example: ':smile: :heart: :check:',
+                    result: '😊 ❤️ ✅'
+                }
+            ];
 
+            const examples = {
+                'Simple Announcement': '**PENGUMUMAN** :megaphone:\n__Pesan Penting__',
+                'Promo Message': '**PROMO SPESIAL** :fire:\n~~Rp 100.000~~ → **Rp 50.000** :star:',
+                'Status Update': 'Status: **Selesai** :check:\n__Updated: 12:00__ :clock:',
+                'Complex Format': '**INFORMASI PENTING** :warning:\n__Harap Dibaca__ :info:\n\n1. Point 1 :check:\n2. Point 2 :star:\n\n```Contact: Admin```'
+            };
+
+            const emojiList = {
+                'Basic': {
+                    ':smile:': '😊',
+                    ':heart:': '❤️',
+                    ':check:': '✅',
+                    ':x:': '❌'
+                },
+                'Status': {
+                    ':warning:': '⚠️',
+                    ':info:': 'ℹ️',
+                    ':star:': '⭐',
+                    ':fire:': '🔥'
+                },
+                'Objects': {
+                    ':clock:': '🕐',
+                    ':phone:': '📱',
+                    ':mail:': '📧',
+                    ':calendar:': '📅'
+                },
+                'Expressions': {
+                    ':laugh:': '😂',
+                    ':wink:': '😉',
+                    ':cool:': '😎',
+                    ':love:': '😍'
+                }
+            };
+
+            res.json({
+                formats,
+                examples,
+                emojiList,
+                notes: [
+                    "Format dapat dikombinasikan dalam satu pesan",
+                    "Emoji dapat digunakan di tengah teks berformat",
+                    "Gunakan newline (\\n) untuk membuat baris baru",
+                    "Format berlaku untuk single message dan bulk message"
+                ]
+            });
+        } catch (error) {
+            console.error('Error getting formats:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+    
 }
+const messageController = new MessageController();
 
 module.exports = new MessageController();

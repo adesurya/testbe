@@ -3,6 +3,8 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const pool = require('../config/database');
 const WhatsappSession = require('../models/WhatsappSession');
+const fs = require('fs');
+const path = require('path');
 
 class WhatsappService {
     constructor() {
@@ -10,21 +12,34 @@ class WhatsappService {
         this.cleanupAuthFiles();  
         this.resetSessions();
         this.initializeExistingSessions();
+        this.initializationPromises = new Map(); // Track ongoing initializations
+        this.initialize();
+    }
 
+    async initialize() {
+        await this.cleanupAuthFiles();
+        await this.resetSessions();
     }
 
     async cleanupAuthFiles() {
         try {
-            const fs = require('fs');
-            const path = require('path');
+            // Path ke direktori .wwebjs_auth
             const authPath = path.join(process.cwd(), '.wwebjs_auth');
+            const cachePath = path.join(process.cwd(), '.wwebjs_cache');
             
+            // Hapus direktori auth jika ada
             if (fs.existsSync(authPath)) {
-                fs.rmdirSync(authPath, { recursive: true });
+                fs.rmSync(authPath, { recursive: true, force: true });
                 console.log('Cleaned up auth files');
             }
+            
+            // Hapus direktori cache jika ada
+            if (fs.existsSync(cachePath)) {
+                fs.rmSync(cachePath, { recursive: true, force: true });
+                console.log('Cleaned up cache files');
+            }
         } catch (error) {
-            console.error('Error cleaning up auth files:', error);
+            console.error('Error cleaning up files:', error);
         }
     }
 
@@ -70,22 +85,44 @@ class WhatsappService {
 
 
     async initializeSession(userId, phoneNumber) {
-        try {
-            console.log(`Initializing WhatsApp session for ${phoneNumber}`);
-            
-            const client = new Client({
-                puppeteer: {
-                    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-                    headless: true
-                }
-            });
+        // Check if initialization is already in progress
+        if (this.initializationPromises.has(phoneNumber)) {
+            console.log(`Initialization already in progress for ${phoneNumber}`);
+            return this.initializationPromises.get(phoneNumber);
+        }
 
-            return new Promise((resolve, reject) => {
+        console.log(`Initializing WhatsApp session for ${phoneNumber}`);
+
+        const initPromise = new Promise(async (resolve, reject) => {
+            try {
+                // Set timeout for initialization
+                const timeoutId = setTimeout(() => {
+                    this.initializationPromises.delete(phoneNumber);
+                    reject(new Error('Initialization timeout'));
+                }, 60000); // 60 seconds timeout
+
+                const client = new Client({
+                    puppeteer: {
+                        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                        headless: true
+                    },
+                    // Disable local auth storage
+                    authStrategy: new LocalAuth({
+                        clientId: phoneNumber,
+                        dataPath: path.join(process.cwd(), '.wwebjs_auth_temp')
+                    })
+                });
+
+                let qrGenerated = false;
+
                 client.on('qr', async (qr) => {
                     try {
-                        console.log(`QR Code generated for ${phoneNumber}`);
-                        const qrCode = await qrcode.toDataURL(qr);
-                        resolve({ qrCode });
+                        if (!qrGenerated) {
+                            console.log(`QR Code generated for ${phoneNumber}`);
+                            const qrCode = await qrcode.toDataURL(qr);
+                            qrGenerated = true;
+                            resolve({ qrCode });
+                        }
                     } catch (error) {
                         reject(error);
                     }
@@ -97,55 +134,105 @@ class WhatsappService {
                     this.sessions.set(phoneNumber, client);
                 });
 
-                client.on('authenticated', () => {
-                    console.log(`WhatsApp client authenticated for ${phoneNumber}`);
-                });
-
                 client.on('auth_failure', async () => {
                     console.log(`Auth failed for ${phoneNumber}`);
                     await this.updateSessionStatus(phoneNumber, 'inactive');
                     this.sessions.delete(phoneNumber);
+                    this.initializationPromises.delete(phoneNumber);
                 });
 
                 client.on('disconnected', async () => {
                     console.log(`WhatsApp client disconnected for ${phoneNumber}`);
                     await this.updateSessionStatus(phoneNumber, 'inactive');
                     this.sessions.delete(phoneNumber);
+                    this.initializationPromises.delete(phoneNumber);
+                    client.destroy();
                 });
 
-                client.initialize().catch(reject);
-            });
-        } catch (error) {
-            console.error(`Error initializing session for ${phoneNumber}:`, error);
-            throw error;
-        }
+                await client.initialize();
+                clearTimeout(timeoutId);
+            } catch (error) {
+                this.initializationPromises.delete(phoneNumber);
+                reject(error);
+            }
+        });
+
+        this.initializationPromises.set(phoneNumber, initPromise);
+        return initPromise;
     }
 
+    async destroySession(phoneNumber) {
+        const client = this.sessions.get(phoneNumber);
+        if (client) {
+            try {
+                await client.destroy();
+                this.sessions.delete(phoneNumber);
+                this.initializationPromises.delete(phoneNumber);
+                await this.updateSessionStatus(phoneNumber, 'inactive');
+                console.log(`Session destroyed for ${phoneNumber}`);
+            } catch (error) {
+                console.error(`Error destroying session for ${phoneNumber}:`, error);
+            }
+        }
+    }
+    
+    async gracefulShutdown() {
+        console.log('Starting graceful shutdown of WhatsApp service...');
+        const shutdownPromises = [];
+
+        // Destroy semua sesi yang aktif
+        for (const [phoneNumber, client] of this.sessions.entries()) {
+            shutdownPromises.push(this.destroySession(phoneNumber));
+        }
+
+        // Tunggu semua sesi selesai di-destroy
+        await Promise.all(shutdownPromises);
+        
+        // Bersihkan file-file auth dan cache
+        await this.cleanupAuthFiles();
+        
+        console.log('WhatsApp service shutdown completed');
+    }
 
     async getAllActiveSessions(userId) {
         const connection = await pool.getConnection();
         try {
             console.log(`Getting active sessions for user ${userId}`);
+            console.log('Type of userId:', typeof userId);
             
-            // Get all sessions marked as active in database
-            const [sessions] = await connection.query(
-                'SELECT * FROM whatsapp_sessions WHERE user_id = ? AND status = "active"',
+            // Query untuk melihat semua sesi tanpa filter status dulu
+            const [allSessions] = await connection.query(
+                'SELECT * FROM whatsapp_sessions WHERE user_id = ?',
                 [userId]
             );
+            console.log('All sessions (without status filter):', allSessions);
             
-            console.log(`Found ${sessions.length} sessions in database`);
+            // Query dengan filter status
+            const [activeSessions] = await connection.query(
+                'SELECT * FROM whatsapp_sessions WHERE user_id = ? AND status = ?',
+                [userId, 'active']
+            );
+            console.log('Active sessions:', activeSessions);
+            
+            // Query untuk memeriksa status yang ada di database
+            const [statuses] = await connection.query(
+                'SELECT DISTINCT status FROM whatsapp_sessions WHERE user_id = ?',
+                [userId]
+            );
+            console.log('Available statuses:', statuses);
     
-            if (sessions.length === 0) {
+            // Jika tidak ada sesi aktif, kembalikan array kosong
+            if (activeSessions.length === 0) {
                 return [];
             }
     
-            // Check and reinitialize sessions if needed
-            const activeSessions = [];
-            for (const session of sessions) {
+            // Proses sesi yang aktif
+            const processedSessions = [];
+            for (const session of activeSessions) {
                 const client = this.sessions.get(session.phone_number);
                 
                 if (!client || !client.info) {
-                    console.log(`Session ${session.phone_number} not initialized or not ready, attempting to initialize`);
+                    console.log(`Session ${session.phone_number} needs initialization`);
                     try {
                         const client = new Client({
                             puppeteer: {
@@ -162,31 +249,67 @@ class WhatsappService {
                             });
     
                             client.on('auth_failure', () => {
+                                console.log(`Auth failed for ${session.phone_number}`);
                                 reject(new Error('Authentication failed'));
                             });
     
                             client.initialize().catch(reject);
                         });
     
-                        activeSessions.push(session);
+                        processedSessions.push(session);
                     } catch (error) {
                         console.error(`Failed to initialize session ${session.phone_number}:`, error);
                         await this.updateSessionStatus(session.phone_number, 'inactive');
-                        continue;
                     }
                 } else {
-                    console.log(`Session ${session.phone_number} already initialized and ready`);
-                    activeSessions.push(session);
+                    console.log(`Session ${session.phone_number} already initialized`);
+                    processedSessions.push(session);
                 }
             }
     
-            console.log(`Returning ${activeSessions.length} active sessions`);
-            return activeSessions;
+            console.log(`Returning ${processedSessions.length} processed sessions`);
+            return processedSessions;
+        } catch (error) {
+            console.error('Error in getAllActiveSessions:', error);
+            throw error;
         } finally {
             connection.release();
         }
     }
 
+    async debugDatabase() {
+        const connection = await pool.getConnection();
+        try {
+            // 1. Check table structure
+            const [columns] = await connection.query(`
+                SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = 'whatsapp_sessions'
+            `);
+            console.log('Table structure:', columns);
+    
+            // 2. Check all records
+            const [allRecords] = await connection.query('SELECT * FROM whatsapp_sessions');
+            console.log('All records:', allRecords);
+    
+            // 3. Check enum values for status
+            const [enumValues] = await connection.query(`
+                SELECT COLUMN_TYPE
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = 'whatsapp_sessions'
+                AND COLUMN_NAME = 'status'
+            `);
+            console.log('Status enum values:', enumValues);
+    
+            return {
+                tableStructure: columns,
+                records: allRecords,
+                statusEnumValues: enumValues
+            };
+        } finally {
+            connection.release();
+        }
+    }
 
     async updateSessionStatus(phoneNumber, status) {
         const connection = await pool.getConnection();
@@ -266,6 +389,9 @@ class WhatsappService {
             const formattedNumber = targetNumber.replace(/[^\d]/g, '');
             const fullNumber = `${formattedNumber}@c.us`;
     
+            // Format pesan dengan styling dan emoji
+            const formattedMessage = MessageFormatter.formatMessage(message);
+    
             // Check if number exists on WhatsApp
             const isRegistered = await client.isRegisteredUser(fullNumber);
             if (!isRegistered) {
@@ -274,24 +400,21 @@ class WhatsappService {
     
             // Send message with or without image
             if (imagePath) {
-                console.log(`Sending message with image: ${imagePath}`);
+                console.log(`Sending formatted message with image: ${imagePath}`);
                 try {
                     const MessageMedia = require('whatsapp-web.js').MessageMedia;
                     const media = await MessageMedia.fromFilePath(imagePath);
                     await client.sendMessage(fullNumber, media, {
-                        caption: message
+                        caption: formattedMessage
                     });
                 } catch (imageError) {
                     console.error('Error sending image:', imageError);
                     // If image fails, try to send just the message
-                    await client.sendMessage(fullNumber, message);
+                    await client.sendMessage(fullNumber, formattedMessage);
                 }
             } else {
-                await client.sendMessage(fullNumber, message);
+                await client.sendMessage(fullNumber, formattedMessage);
             }
-    
-            // Update user plan message count
-            await this.decrementMessageCount(sessionPhone);
     
             console.log(`Message sent successfully to ${targetNumber}`);
             return true;
@@ -300,6 +423,7 @@ class WhatsappService {
             throw error;
         }
     }
+    
 
     async decrementMessageCount(sessionPhone) {
         const connection = await pool.getConnection();

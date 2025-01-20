@@ -14,7 +14,7 @@ class WhatsappSession {
             if (existing.length > 0) {
                 // Update existing session
                 await connection.query(
-                    'UPDATE whatsapp_sessions SET user_id = ?, status = "inactive" WHERE phone_number = ?',
+                    'UPDATE whatsapp_sessions SET user_id = ?, status = "inactive", updated_at = NOW() WHERE phone_number = ?',
                     [userId, phoneNumber]
                 );
                 return existing[0].id;
@@ -22,10 +22,11 @@ class WhatsappSession {
 
             // Create new session
             const [result] = await connection.query(
-                'INSERT INTO whatsapp_sessions (user_id, phone_number) VALUES (?, ?)',
+                'INSERT INTO whatsapp_sessions (user_id, phone_number, status) VALUES (?, ?, "inactive")',
                 [userId, phoneNumber]
             );
-            console.log('WhatsApp session created:', { userId, phoneNumber });
+            
+            console.log('WhatsApp session created:', { userId, phoneNumber, insertId: result.insertId });
             return result.insertId;
         } finally {
             connection.release();
@@ -48,10 +49,14 @@ class WhatsappSession {
     static async findActiveSessions(userId) {
         const connection = await pool.getConnection();
         try {
+            console.log('Finding active sessions for user:', userId);
+            
             const [rows] = await connection.query(
                 'SELECT * FROM whatsapp_sessions WHERE user_id = ? AND status = "active"',
                 [userId]
             );
+            
+            console.log('Found sessions:', rows);
             return rows;
         } finally {
             connection.release();

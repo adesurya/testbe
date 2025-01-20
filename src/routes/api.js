@@ -1096,6 +1096,158 @@ router.get('/metrics', auth, isAdmin, whatsappController.getMetrics);
  *                       type: integer
  */
 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     MessageFormat:
+ *       type: object
+ *       properties:
+ *         formatType:
+ *           type: string
+ *           enum: [bold, italic, strikethrough, monospace, emoji]
+ *         syntax:
+ *           type: string
+ *         example:
+ *           type: string
+ *         result:
+ *           type: string
+ *     MessageRequest:
+ *       type: object
+ *       required:
+ *         - targetNumber
+ *         - message
+ *       properties:
+ *         targetNumber:
+ *           type: string
+ *           description: "Nomor tujuan (format: kode negara + nomor)"
+ *           example: "628123456789"
+ *         message:
+ *           type: string
+ *           description: "Pesan dengan format khusus (bold, italic, emoji, dll)"
+ *           example: "**PENGUMUMAN** :warning:\n__Kepada Pelanggan__\n\nInfo penting"
+ *         imagePath:
+ *           type: string
+ *           description: "Path ke file gambar (opsional)"
+ *           example: "/path/to/image.jpg"
+ *         delay:
+ *           type: integer
+ *           description: "Delay pengiriman dalam detik (opsional)"
+ *           example: 0
+ * 
+ *     BulkMessageRequest:
+ *       type: object
+ *       required:
+ *         - targetNumbers
+ *         - message
+ *       properties:
+ *         targetNumbers:
+ *           type: array
+ *           items:
+ *             type: string
+ *           description: "Array nomor tujuan"
+ *           example: ["628123456789", "628987654321"]
+ *         message:
+ *           type: string
+ *           description: "Pesan dengan format untuk bulk sending"
+ *           example: "**Broadcast** :megaphone:\n__Hello!__"
+ *         baseDelay:
+ *           type: integer
+ *           description: "Delay dasar antara pengiriman (detik)"
+ *           example: 30
+ *         intervalDelay:
+ *           type: integer
+ *           description: "Variasi random delay (detik)"
+ *           example: 10
+ */
+
+/**
+ * @swagger
+ * /api/messages/formats:
+ *   get:
+ *     tags: [Messages]
+ *     summary: Get available message formats
+ *     description: >
+ *       Mendapatkan daftar format yang tersedia untuk pesan WhatsApp.
+ *       
+ *       Format yang didukung:
+ *       
+ *       1. Bold Text
+ *          - Syntax: **text**
+ *          - Contoh: **Important**
+ *       
+ *       2. Italic Text
+ *          - Syntax: __text__
+ *          - Contoh: __Note__
+ *       
+ *       3. Strikethrough
+ *          - Syntax: ~~text~~
+ *          - Contoh: ~~Old price~~
+ *       
+ *       4. Monospace
+ *          - Syntax: ```text```
+ *          - Contoh: ```Code```
+ *       
+ *       5. Emojis
+ *          - Syntax: :emoji_name:
+ *          - Contoh: :smile: :heart: :check:
+ *     responses:
+ *       200:
+ *         description: Daftar format yang tersedia
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/MessageFormat'
+ */
+
+/**
+ * @swagger
+ * /api/messages/send:
+ *   post:
+ *     tags: [Messages]
+ *     summary: Send formatted WhatsApp message
+ *     description: >
+ *       Mengirim pesan WhatsApp dengan dukungan format teks dan emoji.
+ *       Mendukung format bold, italic, strikethrough, monospace, dan emoji.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/MessageRequest'
+ *     responses:
+ *       200:
+ *         description: Message sent successfully
+ */
+
+/**
+ * @swagger
+ * /api/messages/bulk/send:
+ *   post:
+ *     tags: [Messages]
+ *     summary: Send bulk formatted messages
+ *     description: >
+ *       Mengirim pesan WhatsApp dengan format ke banyak nomor sekaligus.
+ *       Mendukung semua format yang sama dengan pengiriman single message.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/BulkMessageRequest'
+ *     responses:
+ *       200:
+ *         description: Bulk messages queued successfully
+ */
+router.get('/messages/formats', messageController.getFormats);
+
+
 // Route implementation
 router.post('/messages/bulk/send', auth, messageController.sendBulkMessages);
 router.get('/messages/bulk/:bulkId/status', auth, messageController.getBulkStatus);
