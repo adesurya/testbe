@@ -67,7 +67,7 @@ class MessageController {
             const { targetNumber, message, imagePath, delay } = req.body;
             const userId = req.user.id;
 
-            // Check user plan
+            console.log('Checking plan for user:', userId);
             const activePlan = await this.checkUserPlan(userId);
             if (!activePlan) {
                 return res.status(400).json({
@@ -75,9 +75,9 @@ class MessageController {
                 });
             }
 
-            // Get active session
+            console.log('Getting active WhatsApp sessions');
             const activeSessions = await WhatsappService.getAllActiveSessions(userId);
-            if (!activeSessions.length) {
+            if (!activeSessions || activeSessions.length === 0) {
                 return res.status(400).json({
                     error: 'No active WhatsApp sessions'
                 });
@@ -85,6 +85,7 @@ class MessageController {
 
             // Select random session
             const session = activeSessions[Math.floor(Math.random() * activeSessions.length)];
+            console.log('Selected session:', session.phone_number);
 
             try {
                 await WhatsappService.sendMessage(
@@ -92,10 +93,10 @@ class MessageController {
                     targetNumber,
                     message,
                     imagePath,
-                    delay
+                    delay || 0
                 );
 
-                // Record metrics
+                // Record success metrics
                 await Metrics.recordMessageSent(userId, session.id);
 
                 res.json({
@@ -104,6 +105,7 @@ class MessageController {
                     messagesRemaining: activePlan.messages_remaining - 1
                 });
             } catch (error) {
+                // Record failed metrics
                 await Metrics.recordMessageFailed(userId, session.id);
                 throw error;
             }

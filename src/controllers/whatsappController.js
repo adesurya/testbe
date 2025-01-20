@@ -14,19 +14,29 @@ class WhatsappController {
                     error: 'userId and phoneNumber are required' 
                 });
             }
-
-            console.log('Initializing WhatsApp session...');
-            const qrCode = await WhatsappService.initializeSession(userId, phoneNumber);
-            
+    
+            // Tambah timeout promise
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('QR generation timeout')), 60000);
+            });
+    
+            // Race antara generate QR dan timeout
+            const result = await Promise.race([
+                WhatsappService.initializeSession(userId, phoneNumber),
+                timeoutPromise
+            ]);
+    
             console.log('Creating WhatsApp session in database...');
             await WhatsappSession.create(userId, phoneNumber);
-
+    
             console.log('Sending QR code response...');
-            res.json({ qrCode });
+            res.json(result);
         } catch (error) {
             console.error('Error in bindWhatsapp:', error);
             res.status(500).json({ 
-                error: error.message,
+                error: error.message === 'QR generation timeout' ? 
+                    'QR code generation timed out. Please try again.' : 
+                    error.message,
                 stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
             });
         }
