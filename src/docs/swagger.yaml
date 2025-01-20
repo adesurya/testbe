@@ -1,0 +1,170 @@
+// src/docs/swagger.yml
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     User:
+ *       type: object
+ *       required:
+ *         - username
+ *         - password
+ *         - email
+ *       properties:
+ *         username:
+ *           type: string
+ *           description: User's username
+ *         password:
+ *           type: string
+ *           description: User's password
+ *         email:
+ *           type: string
+ *           format: email
+ *           description: User's email
+ *     LoginResponse:
+ *       type: object
+ *       properties:
+ *         token:
+ *           type: string
+ *           description: JWT token
+ *         user:
+ *           type: object
+ *           properties:
+ *             id:
+ *               type: integer
+ *             username:
+ *               type: string
+ *             email:
+ *               type: string
+ *             role:
+ *               type: string
+ *               enum: [admin, user]
+ * 
+ * /api/auth/login:
+ *   post:
+ *     tags:
+ *       - Authentication
+ *     summary: Login user
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - username
+ *               - password
+ *             properties:
+ *               username:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/LoginResponse'
+ * 
+ * /api/users:
+ *   post:
+ *     tags:
+ *       - Users
+ *     summary: Create new user (Admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/User'
+ *     responses:
+ *       201:
+ *         description: User created successfully
+ * 
+ * /api/whatsapp/bind:
+ *   post:
+ *     tags:
+ *       - WhatsApp
+ *     summary: Bind new WhatsApp session
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userId
+ *               - phoneNumber
+ *             properties:
+ *               userId:
+ *                 type: string
+ *               phoneNumber:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: QR Code generated successfully
+ * 
+ * /api/whatsapp/sessions/{userId}:
+ *   get:
+ *     tags:
+ *       - WhatsApp
+ *     summary: Get active WhatsApp sessions
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of active sessions
+ * 
+ * /api/messages/send:
+ *   post:
+ *     tags:
+ *       - Messages
+ *     summary: Send WhatsApp message
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userId
+ *               - targetNumber
+ *               - message
+ *             properties:
+ *               userId:
+ *                 type: string
+ *               targetNumber:
+ *                 type: string
+ *               message:
+ *                 type: string
+ *               imagePath:
+ *                 type: string
+ *               delay:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Message queued successfully
+ * 
+ * /api/metrics:
+ *   get:
+ *     tags:
+ *       - Metrics
+ *     summary: Get user metrics
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: User metrics retrieved successfully
+ */
