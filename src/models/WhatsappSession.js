@@ -33,6 +33,51 @@ class WhatsappSession {
         }
     }
 
+    static async getAllActiveSessions() {
+        const connection = await pool.getConnection();
+        try {
+            const [sessions] = await connection.query(
+                `SELECT ws.*, u.username as owner_username
+                 FROM whatsapp_sessions ws
+                 JOIN users u ON ws.user_id = u.id
+                 WHERE ws.status = 'active' AND ws.is_shared = true`
+            );
+            return sessions;
+        } finally {
+            connection.release();
+        }
+    }
+
+    static async findSessionsForUser(userId) {
+        const connection = await pool.getConnection();
+        try {
+            const [rows] = await connection.query(
+                `SELECT ws.*, u.username as owner_username
+                 FROM whatsapp_sessions ws
+                 JOIN users u ON ws.user_id = u.id
+                 WHERE (ws.user_id = ? OR ws.is_shared = true)
+                 AND ws.status = 'active'`,
+                [userId]
+            );
+            return rows;
+        } finally {
+            connection.release();
+        }
+    }
+
+    static async updateSharedStatus(sessionId, isShared) {
+        const connection = await pool.getConnection();
+        try {
+            await connection.query(
+                'UPDATE whatsapp_sessions SET is_shared = ? WHERE id = ?',
+                [isShared, sessionId]
+            );
+            return true;
+        } finally {
+            connection.release();
+        }
+    }
+
     static async updateStatus(phoneNumber, status) {
         const connection = await pool.getConnection();
         try {

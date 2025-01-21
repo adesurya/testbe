@@ -2,6 +2,126 @@
 const pool = require('../config/database');
 
 class Message {
+
+    static async checkUserPlan(userId) {
+        const connection = await pool.getConnection();
+        try {
+            console.log('Checking plan for userId:', userId);
+
+            const [plans] = await connection.query(
+                `SELECT up.*, p.name as plan_name 
+                 FROM user_plans up
+                 JOIN plans p ON up.plan_id = p.id 
+                 WHERE up.user_id = ? 
+                 AND up.status = 'active' 
+                 AND up.messages_remaining > 0
+                 AND NOW() < up.end_date
+                 ORDER BY up.end_date ASC`,
+                [userId]
+            );
+
+            console.log('Found plans:', plans);
+
+            if (!plans || plans.length === 0) {
+                console.log('No active plan found for user:', userId);
+                return null;
+            }
+
+            const plan = plans[0];
+            console.log('Active plan details:', {
+                id: plan.id,
+                name: plan.plan_name,
+                messagesRemaining: plan.messages_remaining,
+                endDate: plan.end_date
+            });
+
+            return plan;
+        } finally {
+            connection.release();
+        }
+    }
+
+    static async decrementUserPlan(userId, messageCount = 1) {
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+
+            // Debug: Log input parameters
+            console.log('Checking plan for userId:', userId, 'messageCount:', messageCount);
+
+            // Get active plan - tambahkan logging
+            const [plans] = await connection.query(
+                `SELECT up.*, p.name as plan_name 
+                 FROM user_plans up
+                 JOIN plans p ON up.plan_id = p.id 
+                 WHERE up.user_id = ? 
+                 AND up.status = 'active' 
+                 AND up.messages_remaining > 0
+                 AND NOW() < up.end_date
+                 ORDER BY up.end_date ASC`,
+                [userId]
+            );
+
+            console.log('Found plans:', plans); // Debug log
+
+            if (!plans || plans.length === 0) {
+                throw new Error('No active plan found');
+            }
+
+            const plan = plans[0];
+            console.log('Selected plan:', {
+                id: plan.id,
+                name: plan.plan_name,
+                messagesRemaining: plan.messages_remaining,
+                endDate: plan.end_date
+            });
+
+            if (plan.messages_remaining < messageCount) {
+                throw new Error(`Insufficient messages remaining. Required: ${messageCount}, Available: ${plan.messages_remaining}`);
+            }
+
+            // Update messages_remaining
+            const [result] = await connection.query(
+                `UPDATE user_plans 
+                 SET messages_remaining = messages_remaining - ?,
+                     updated_at = NOW()
+                 WHERE id = ? 
+                 AND messages_remaining >= ?
+                 AND status = 'active'
+                 AND NOW() < end_date`,
+                [messageCount, plan.id, messageCount]
+            );
+
+            if (result.affectedRows === 0) {
+                throw new Error(`Failed to update message count for plan ${plan.id}`);
+            }
+
+            console.log(`Successfully decremented ${messageCount} messages from plan ${plan.id}`);
+
+            // Get updated plan details
+            const [updatedPlan] = await connection.query(
+                'SELECT * FROM user_plans WHERE id = ?',
+                [plan.id]
+            );
+
+            console.log('Updated plan details:', updatedPlan[0]);
+
+            await connection.commit();
+            return {
+                success: true,
+                planId: plan.id,
+                remainingMessages: updatedPlan[0].messages_remaining
+            };
+        } catch (error) {
+            await connection.rollback();
+            console.error('Error in decrementUserPlan:', error);
+            throw error;
+        } finally {
+            connection.release();
+        }
+    }
+
+
     static async create(messageData) {
         const connection = await pool.getConnection();
         try {
@@ -97,6 +217,17 @@ class Message {
                 throw new Error('Bulk message not found');
             }
 
+            // Safely parse failed_numbers or return empty array
+            let failedNumbers = [];
+            if (bulkStatus[0].failed_numbers) {
+                try {
+                    failedNumbers = JSON.parse(bulkStatus[0].failed_numbers);
+                } catch (error) {
+                    console.warn('Error parsing failed_numbers:', error);
+                    failedNumbers = [];
+                }
+            }
+
             return {
                 id: bulkId,
                 status: bulkStatus[0].status,
@@ -104,7 +235,7 @@ class Message {
                 sentMessages: bulkStatus[0].sent_messages,
                 failedMessages: bulkStatus[0].failed_messages,
                 pendingMessages: bulkStatus[0].pending_messages,
-                failedNumbers: JSON.parse(bulkStatus[0].failed_numbers || '[]'),
+                failedNumbers: failedNumbers,
                 createdAt: bulkStatus[0].created_at,
                 completedAt: bulkStatus[0].completed_at
             };
@@ -141,15 +272,24 @@ class Message {
                 WHERE bulk_id = ? AND target_number = ?`,
                 updateValues
             );
+
+            console.log(`Updated status to ${status} for bulk message ${bulkId}, target ${targetNumber}`);
+        } catch (error) {
+            console.error('Error updating bulk message status:', error);
+            throw error;
         } finally {
             connection.release();
         }
     }
 
-    static async updateBulkStatus(bulkId, { failedNumbers, completedAt }) {
+    static async updateBulkStatus(bulkId, { failedNumbers = [], completedAt }) {
         const connection = await pool.getConnection();
         try {
             await connection.beginTransaction();
+
+            // Ensure failedNumbers is always an array and properly stringified
+            const failedNumbersArray = Array.isArray(failedNumbers) ? failedNumbers : [];
+            const failedNumbersJson = JSON.stringify(failedNumbersArray);
 
             // Update status bulk message
             await connection.query(
@@ -164,8 +304,8 @@ class Message {
                     updated_at = CURRENT_TIMESTAMP
                  WHERE id = ?`,
                 [
-                    failedNumbers.length,
-                    JSON.stringify(failedNumbers),
+                    failedNumbersArray.length,
+                    failedNumbersJson,
                     completedAt,
                     bulkId
                 ]
@@ -189,12 +329,18 @@ class Message {
                     total_sent = ?,
                     total_failed = ?
                  WHERE id = ?`,
-                [stats[0].sent, stats[0].failed, bulkId]
+                [
+                    Number(stats[0].sent) || 0,
+                    Number(stats[0].failed) || 0,
+                    bulkId
+                ]
             );
 
             await connection.commit();
+            console.log(`Bulk status updated successfully for ID ${bulkId}`);
         } catch (error) {
             await connection.rollback();
+            console.error('Error updating bulk status:', error);
             throw error;
         } finally {
             connection.release();

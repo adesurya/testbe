@@ -300,6 +300,60 @@ class Plan {
             connection.release();
         }
     }
+
+    static async decrementMessageCount(userId) {
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+
+            // Get active plan
+            const [activePlans] = await connection.query(
+                `SELECT * FROM user_plans 
+                 WHERE user_id = ? 
+                 AND status = 'active' 
+                 AND messages_remaining > 0 
+                 AND NOW() < end_date 
+                 ORDER BY end_date ASC`,
+                [userId]
+            );
+
+            if (!activePlans || activePlans.length === 0) {
+                throw new Error('No active plan found with remaining messages');
+            }
+
+            const plan = activePlans[0];
+
+            // Decrement message count
+            const [result] = await connection.query(
+                `UPDATE user_plans 
+                 SET messages_remaining = messages_remaining - 1,
+                     updated_at = NOW()
+                 WHERE id = ? AND messages_remaining > 0`,
+                [plan.id]
+            );
+
+            if (result.affectedRows === 0) {
+                throw new Error('Failed to update message count');
+            }
+
+            // Add to message usage log
+            await connection.query(
+                `INSERT INTO message_usage_log 
+                 (user_id, plan_id, message_type, created_at) 
+                 VALUES (?, ?, 'sent', NOW())`,
+                [userId, plan.id]
+            );
+
+            await connection.commit();
+            return true;
+        } catch (error) {
+            await connection.rollback();
+            console.error('Error decrementing message count:', error);
+            throw error;
+        } finally {
+            connection.release();
+        }
+    }
 }
 
 module.exports = Plan;

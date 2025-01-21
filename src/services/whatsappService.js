@@ -5,6 +5,17 @@ const pool = require('../config/database');
 const WhatsappSession = require('../models/WhatsappSession');
 const fs = require('fs');
 const path = require('path');
+const MessageFormatter = require('./messageFormatter');
+const util = require('util');
+const Message = require('../models/Message'); 
+
+const fsPromises = {
+    readdir: util.promisify(fs.readdir),
+    unlink: util.promisify(fs.unlink),
+    rmdir: util.promisify(fs.rmdir),
+    stat: util.promisify(fs.stat),
+    access: util.promisify(fs.access)
+};
 
 class WhatsappService {
     constructor() {
@@ -16,32 +27,146 @@ class WhatsappService {
         this.initialize();
     }
 
+    convertEmojiCodes(message) {
+        const emojiMap = {
+            ':fire:': '🔥',
+            ':smile:': '😊',
+            ':heart:': '❤️',
+            ':check:': '✅',
+            ':x:': '❌',
+            ':star:': '⭐',
+            ':laugh:': '😂',
+            ':wink:': '😉',
+            ':cry:': '😢',
+            ':angry:': '😠',
+            ':cool:': '😎',
+            ':love:': '😍',
+            ':surprise:': '😮',
+            ':thinking:': '🤔',
+            ':clap:': '👏',
+            ':pray:': '🙏',
+            ':rocket:': '🚀',
+            ':warning:': '⚠️',
+            ':info:': 'ℹ️',
+            ':phone:': '📱',
+            ':mail:': '📧',
+            ':calendar:': '📅',
+            ':time:': '⌚',
+            ':money:': '💰',
+            ':ok:': '👌',
+            ':new:': '🆕',
+            ':free:': '🆓',
+            'grin': '😁',
+            'wink': '😉',
+            'star_eyes': '🤩',
+            'sweat_smile': '😅',
+            'sleepy': '😴',
+            'relieved': '😌',
+            'neutral_face': '😐',
+            'confused': '😕',
+            'angry': '😠',
+            'scream': '😱',
+            'poop': '💩',
+            'clown': '🤡',
+            'alien': '👽',
+            'ghost': '👻',
+            'skull': '💀',
+            'sun': '☀️',
+            'moon': '🌙',
+            'cloud': '☁️',
+            'umbrella': '☂️',
+            'coffee': '☕',
+            'soccer_ball': '⚽',
+            'basketball': '🏀',
+            'football': '🏈',
+            'trophy': '🏆',
+            'medal': '🏅',
+            'apple': '🍎',
+            'banana': '🍌',
+            'pizza': '🍕',
+            'cake': '🍰'
+        };
+
+        let formattedMessage = message;
+        for (const [code, emoji] of Object.entries(emojiMap)) {
+            formattedMessage = formattedMessage.replace(new RegExp(code, 'g'), emoji);
+        }
+
+        return formattedMessage;
+    }
+
+    async safeRemoveDir(dirPath) {
+        try {
+            // Check if directory exists
+            try {
+                await fsPromises.access(dirPath, fs.constants.F_OK);
+            } catch (err) {
+                // Directory doesn't exist, just return
+                return;
+            }
+
+            // Read directory contents
+            const files = await fsPromises.readdir(dirPath);
+
+            // Delete all files/subdirectories inside the directory
+            for (const file of files) {
+                const filePath = path.join(dirPath, file);
+                const stats = await fsPromises.stat(filePath);
+
+                if (stats.isDirectory()) {
+                    // Recursively remove subdirectories
+                    await this.safeRemoveDir(filePath);
+                } else {
+                    // Remove files
+                    try {
+                        await fsPromises.unlink(filePath);
+                    } catch (err) {
+                        console.warn(`Warning: Could not delete file ${filePath}:`, err.message);
+                    }
+                }
+            }
+
+            // Remove the empty directory
+            try {
+                await fsPromises.rmdir(dirPath);
+                console.log(`Successfully removed directory: ${dirPath}`);
+            } catch (err) {
+                console.warn(`Warning: Could not remove directory ${dirPath}:`, err.message);
+            }
+        } catch (error) {
+            console.warn(`Warning: Error processing directory ${dirPath}:`, error.message);
+        }
+    }
+
     async initialize() {
-        await this.cleanupAuthFiles();
         await this.resetSessions();
     }
 
     async cleanupAuthFiles() {
         try {
-            // Path ke direktori .wwebjs_auth
-            const authPath = path.join(process.cwd(), '.wwebjs_auth');
+            const authPath = path.join(process.cwd(), '.wwebjs_auth_temp');
             const cachePath = path.join(process.cwd(), '.wwebjs_cache');
-            
-            // Hapus direktori auth jika ada
-            if (fs.existsSync(authPath)) {
-                fs.rmSync(authPath, { recursive: true, force: true });
-                console.log('Cleaned up auth files');
-            }
-            
-            // Hapus direktori cache jika ada
-            if (fs.existsSync(cachePath)) {
-                fs.rmSync(cachePath, { recursive: true, force: true });
-                console.log('Cleaned up cache files');
-            }
+
+            console.log('Starting cleanup of auth and cache directories...');
+
+            // Clean directories sequentially to avoid any race conditions
+            await this.safeRemoveDir(authPath);
+            await this.safeRemoveDir(cachePath);
+
+            console.log('Auth and cache files cleaned up successfully');
         } catch (error) {
-            console.error('Error cleaning up files:', error);
+            console.error('Error during cleanupAuthFiles:', error);
         }
     }
+
+    getSessionPath(phoneNumber) {
+        return path.join(process.cwd(), '.wwebjs_auth_temp', `session-${phoneNumber}`);
+    }
+
+    getSessionPath(phoneNumber) {
+        return path.join(process.cwd(), '.wwebjs_auth_temp', `session-${phoneNumber}`);
+    }
+
 
     async resetSessions() {
         const connection = await pool.getConnection();
@@ -54,6 +179,8 @@ class WhatsappService {
             connection.release();
         }
     }
+
+
 
     async initializeExistingSessions() {
         try {
@@ -85,80 +212,156 @@ class WhatsappService {
 
 
     async initializeSession(userId, phoneNumber) {
-        // Check if initialization is already in progress
         if (this.initializationPromises.has(phoneNumber)) {
             console.log(`Initialization already in progress for ${phoneNumber}`);
             return this.initializationPromises.get(phoneNumber);
         }
 
-        console.log(`Initializing WhatsApp session for ${phoneNumber}`);
+        console.log(`Starting WhatsApp session initialization for ${phoneNumber}`);
 
         const initPromise = new Promise(async (resolve, reject) => {
             try {
-                // Set timeout for initialization
-                const timeoutId = setTimeout(() => {
-                    this.initializationPromises.delete(phoneNumber);
-                    reject(new Error('Initialization timeout'));
-                }, 60000); // 60 seconds timeout
-
                 const client = new Client({
                     puppeteer: {
-                        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-                        headless: true
+                        headless: true,
+                        args: [
+                            '--no-sandbox',
+                            '--disable-setuid-sandbox',
+                            '--disable-dev-shm-usage',
+                            '--disable-accelerated-2d-canvas',
+                            '--no-first-run',
+                            '--single-process',
+                            '--disable-gpu',
+                            '--no-zygote',
+                            '--disable-web-security',
+                            '--ignore-certificate-errors',
+                            '--allow-running-insecure-content',
+                            '--disable-features=IsolateOrigins,site-per-process'
+                        ],
+                        defaultViewport: null,
+                        ignoreHTTPSErrors: true
                     },
-                    // Disable local auth storage
                     authStrategy: new LocalAuth({
                         clientId: phoneNumber,
-                        dataPath: path.join(process.cwd(), '.wwebjs_auth_temp')
-                    })
+                        dataPath: path.join(process.cwd(), '.wwebjs_auth')
+                    }),
+                    restartOnAuthFail: true,
+                    qrMaxRetries: 5,
+                    takeoverTimeoutMs: 120000
                 });
 
                 let qrGenerated = false;
 
                 client.on('qr', async (qr) => {
                     try {
+                        console.log(`Generating QR code for ${phoneNumber}`);
+                        const qrCode = await qrcode.toDataURL(qr);
                         if (!qrGenerated) {
-                            console.log(`QR Code generated for ${phoneNumber}`);
-                            const qrCode = await qrcode.toDataURL(qr);
                             qrGenerated = true;
                             resolve({ qrCode });
                         }
                     } catch (error) {
+                        console.error(`Error generating QR code: ${error.message}`);
                         reject(error);
                     }
                 });
 
                 client.on('ready', async () => {
                     console.log(`WhatsApp client ready for ${phoneNumber}`);
-                    await this.updateSessionStatus(phoneNumber, 'active');
-                    this.sessions.set(phoneNumber, client);
+                    try {
+                        await this.updateSessionStatus(phoneNumber, 'active');
+                        this.sessions.set(phoneNumber, client);
+                    } catch (error) {
+                        console.error(`Error updating session status: ${error.message}`);
+                    }
                 });
 
-                client.on('auth_failure', async () => {
-                    console.log(`Auth failed for ${phoneNumber}`);
+                client.on('authenticated', () => {
+                    console.log(`WhatsApp client authenticated for ${phoneNumber}`);
+                });
+
+                client.on('auth_failure', async (error) => {
+                    console.error(`Authentication failed for ${phoneNumber}:`, error);
+                    await this.updateSessionStatus(phoneNumber, 'inactive');
+                    this.sessions.delete(phoneNumber);
+                    this.initializationPromises.delete(phoneNumber);
+                    reject(new Error('Authentication failed'));
+                });
+
+                client.on('disconnected', async (reason) => {
+                    console.log(`WhatsApp client disconnected for ${phoneNumber}. Reason:`, reason);
                     await this.updateSessionStatus(phoneNumber, 'inactive');
                     this.sessions.delete(phoneNumber);
                     this.initializationPromises.delete(phoneNumber);
                 });
 
-                client.on('disconnected', async () => {
-                    console.log(`WhatsApp client disconnected for ${phoneNumber}`);
-                    await this.updateSessionStatus(phoneNumber, 'inactive');
-                    this.sessions.delete(phoneNumber);
-                    this.initializationPromises.delete(phoneNumber);
-                    client.destroy();
+                client.on('loading_screen', (percent, message) => {
+                    console.log(`Loading screen: ${percent}% - ${message}`);
+                });
+
+                client.on('change_state', state => {
+                    console.log(`State changed to: ${state}`);
                 });
 
                 await client.initialize();
-                clearTimeout(timeoutId);
+                console.log('WhatsApp client initialization completed');
+
             } catch (error) {
+                console.error(`Error initializing session for ${phoneNumber}:`, error);
                 this.initializationPromises.delete(phoneNumber);
                 reject(error);
             }
         });
 
-        this.initializationPromises.set(phoneNumber, initPromise);
-        return initPromise;
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => {
+                this.initializationPromises.delete(phoneNumber);
+                reject(new Error('Session initialization timeout'));
+            }, 120000); // 120 seconds timeout
+        });
+
+        this.initializationPromises.set(phoneNumber,
+            Promise.race([initPromise, timeoutPromise])
+                .catch(error => {
+                    this.initializationPromises.delete(phoneNumber);
+                    throw error;
+                })
+        );
+
+        return this.initializationPromises.get(phoneNumber);
+    }
+
+
+    async cleanupSession(phoneNumber) {
+        try {
+            console.log(`Starting cleanup for session ${phoneNumber}...`);
+            
+            // Cleanup client
+            const client = this.sessions.get(phoneNumber);
+            if (client) {
+                try {
+                    await client.destroy();
+                    console.log(`Client destroyed for ${phoneNumber}`);
+                } catch (err) {
+                    console.warn(`Warning: Error destroying client for ${phoneNumber}:`, err.message);
+                }
+            }
+
+            // Remove from maps
+            this.sessions.delete(phoneNumber);
+            this.initializationPromises.delete(phoneNumber);
+
+            // Update database status
+            await this.updateSessionStatus(phoneNumber, 'inactive');
+
+            // Cleanup session directory
+            const sessionPath = this.getSessionPath(phoneNumber);
+            await this.safeRemoveDir(sessionPath);
+
+            console.log(`Session cleanup completed for ${phoneNumber}`);
+        } catch (error) {
+            console.error(`Error cleaning up session for ${phoneNumber}:`, error);
+        }
     }
 
     async destroySession(phoneNumber) {
@@ -314,10 +517,14 @@ class WhatsappService {
     async updateSessionStatus(phoneNumber, status) {
         const connection = await pool.getConnection();
         try {
+            console.log(`Updating session status for ${phoneNumber} to ${status}`);
             await connection.query(
                 'UPDATE whatsapp_sessions SET status = ?, updated_at = NOW() WHERE phone_number = ?',
                 [status, phoneNumber]
             );
+        } catch (error) {
+            console.error(`Error updating session status: ${error.message}`);
+            throw error;
         } finally {
             connection.release();
         }
@@ -373,34 +580,37 @@ class WhatsappService {
         return client.info !== null && client.info !== undefined;
     }
 
-    async sendMessage(sessionPhone, targetNumber, message, imagePath = null, delay = 0) {
+    async sendMessage(sessionPhone, targetNumber, message, userId, imagePath = null, delay = 0) {
         console.log(`Attempting to send message to ${targetNumber} using ${sessionPhone}`);
         let client = this.sessions.get(sessionPhone);
-    
+
         if (!client || !client.info) {
             throw new Error(`Session ${sessionPhone} is not ready`);
         }
-    
+
         try {
             if (delay > 0) {
                 await new Promise(resolve => setTimeout(resolve, delay * 1000));
             }
-    
+
             const formattedNumber = targetNumber.replace(/[^\d]/g, '');
             const fullNumber = `${formattedNumber}@c.us`;
-    
-            // Format pesan dengan styling dan emoji
-            const formattedMessage = MessageFormatter.formatMessage(message);
-    
+
             // Check if number exists on WhatsApp
             const isRegistered = await client.isRegisteredUser(fullNumber);
             if (!isRegistered) {
                 throw new Error(`Number ${targetNumber} is not registered on WhatsApp`);
             }
-    
+
+            // Konversi kode emoji dalam pesan
+            const formattedMessage = this.convertEmojiCodes(message);
+
+            // Decrement message count in user_plans
+            await Message.decrementUserPlan(userId, 1);
+
             // Send message with or without image
             if (imagePath) {
-                console.log(`Sending formatted message with image: ${imagePath}`);
+                console.log(`Sending message with image: ${imagePath}`);
                 try {
                     const MessageMedia = require('whatsapp-web.js').MessageMedia;
                     const media = await MessageMedia.fromFilePath(imagePath);
@@ -409,13 +619,12 @@ class WhatsappService {
                     });
                 } catch (imageError) {
                     console.error('Error sending image:', imageError);
-                    // If image fails, try to send just the message
                     await client.sendMessage(fullNumber, formattedMessage);
                 }
             } else {
                 await client.sendMessage(fullNumber, formattedMessage);
             }
-    
+
             console.log(`Message sent successfully to ${targetNumber}`);
             return true;
         } catch (error) {
@@ -423,6 +632,7 @@ class WhatsappService {
             throw error;
         }
     }
+
     
 
     async decrementMessageCount(sessionPhone) {

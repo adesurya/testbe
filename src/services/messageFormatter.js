@@ -2,6 +2,8 @@
 
 class MessageFormatter {
     static formatMessage(message) {
+        if (!message) return '';
+
         // Replace placeholders with WhatsApp markdown
         return message
             // Bold: **text** atau *text*
@@ -19,26 +21,63 @@ class MessageFormatter {
             // Handle emoji codes seperti :smile:, :heart:, dll
             .replace(/:([\w+-]+):/g, (match, code) => {
                 const emojiMap = {
-                    'smile': '😊',
-                    'heart': '❤️',
-                    'thumbsup': '👍',
-                    'check': '✅',
-                    'x': '❌',
-                    'star': '⭐',
-                    'fire': '🔥',
-                    'laugh': '😂',
+                    ':fire:': '🔥',
+                    ':smile:': '😊',
+                    ':heart:': '❤️',
+                    ':check:': '✅',
+                    ':x:': '❌',
+                    ':star:': '⭐',
+                    ':laugh:': '😂',
+                    ':wink:': '😉',
+                    ':cry:': '😢',
+                    ':angry:': '😠',
+                    ':cool:': '😎',
+                    ':love:': '😍',
+                    ':surprise:': '😮',
+                    ':thinking:': '🤔',
+                    ':clap:': '👏',
+                    ':pray:': '🙏',
+                    ':rocket:': '🚀',
+                    ':warning:': '⚠️',
+                    ':info:': 'ℹ️',
+                    ':phone:': '📱',
+                    ':mail:': '📧',
+                    ':calendar:': '📅',
+                    ':time:': '⌚',
+                    ':money:': '💰',
+                    ':ok:': '👌',
+                    ':new:': '🆕',
+                    ':free:': '🆓',
+                    'grin': '😁',
                     'wink': '😉',
-                    'cry': '😢',
+                    'star_eyes': '🤩',
+                    'sweat_smile': '😅',
+                    'sleepy': '😴',
+                    'relieved': '😌',
+                    'neutral_face': '😐',
+                    'confused': '😕',
                     'angry': '😠',
-                    'cool': '😎',
-                    'love': '😍',
-                    'surprise': '😮',
-                    'thinking': '🤔',
-                    'clap': '👏',
-                    'pray': '🙏',
-                    'rocket': '🚀',
-                    'warning': '⚠️',
-                    'info': 'ℹ️',
+                    'scream': '😱',
+                    'poop': '💩',
+                    'clown': '🤡',
+                    'alien': '👽',
+                    'ghost': '👻',
+                    'skull': '💀',
+                    'sun': '☀️',
+                    'moon': '🌙',
+                    'cloud': '☁️',
+                    'umbrella': '☂️',
+                    'coffee': '☕',
+                    'soccer_ball': '⚽',
+                    'basketball': '🏀',
+                    'football': '🏈',
+                    'trophy': '🏆',
+                    'medal': '🏅',
+                    'apple': '🍎',
+                    'banana': '🍌',
+                    'pizza': '🍕',
+                    'cake': '🍰'
+
                     // Tambahkan emoji lain sesuai kebutuhan
                 };
                 return emojiMap[code] || match;

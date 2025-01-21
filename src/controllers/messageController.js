@@ -4,6 +4,7 @@ const WhatsappService = require('../services/whatsappService');
 const WhatsappSession = require('../models/WhatsappSession');
 const pool = require('../config/database');
 const Metrics = require('../models/Metrics');
+const MessageFormatter = require('../services/messageFormatter');
 
 
 class MessageController {
@@ -68,7 +69,7 @@ class MessageController {
         const connection = await pool.getConnection();
         try {
             const { targetNumber, message, imagePath, delay } = req.body;
-            const userId = req.user.id;
+            const userId = req.user.id; // Pastikan mengambil userId dari req.user
     
             console.log('Checking plan for user:', userId);
             const activePlan = await this.checkUserPlan(userId);
@@ -90,52 +91,40 @@ class MessageController {
             const session = activeSessions[Math.floor(Math.random() * activeSessions.length)];
             console.log('Selected session:', session.phone_number);
     
-            // Create message record first
-            const messageId = await Message.create({
-                userId: userId,
-                whatsappSessionId: session.id,
-                targetNumber: targetNumber,
-                message: message,
-                imagePath: imagePath,
-                status: 'pending'
-            });
-    
-            console.log('Created message record:', messageId);
-    
             try {
+                // Gunakan userId dari req.user untuk pengurangan plan
                 await WhatsappService.sendMessage(
                     session.phone_number,
                     targetNumber,
                     message,
+                    userId, // Pass userId untuk decrement plan
                     imagePath,
                     delay || 0
                 );
-    
-                // Update message status to sent
-                await Message.updateStatus(messageId, 'sent');
-                console.log('Message sent successfully, status updated');
     
                 // Record success metrics
                 await Metrics.recordMessageSent(userId, session.id);
     
                 res.json({
+                    success: true,
                     message: 'Message sent successfully',
-                    messageId: messageId,
-                    sessionUsed: session.phone_number,
-                    messagesRemaining: activePlan.messages_remaining - 1
+                    data: {
+                        sessionUsed: session.phone_number,
+                        messagesRemaining: activePlan.messages_remaining - 1,
+                        planId: activePlan.id
+                    }
                 });
             } catch (error) {
-                // Update message status to failed
-                await Message.updateStatus(messageId, 'failed');
-                console.log('Message failed, status updated');
-    
                 // Record failed metrics
                 await Metrics.recordMessageFailed(userId, session.id);
                 throw error;
             }
         } catch (error) {
             console.error('Error sending message:', error);
-            res.status(500).json({ error: error.message });
+            res.status(500).json({ 
+                success: false,
+                error: error.message 
+            });
         } finally {
             connection.release();
         }
@@ -227,32 +216,42 @@ class MessageController {
             const { targetNumbers, message, imagePath, baseDelay = 30, intervalDelay = 10 } = req.body;
             const userId = req.user.id;
 
-            console.log('Checking plan for bulk messages. User:', userId);
-            const activePlan = await this.checkUserPlan(userId);
-            if (!activePlan) {
+            // Validasi input
+            if (!targetNumbers || !Array.isArray(targetNumbers) || targetNumbers.length === 0) {
                 return res.status(400).json({
-                    error: 'No active plan or insufficient messages remaining'
+                    success: false,
+                    error: 'targetNumbers must be a non-empty array'
                 });
             }
 
-            if (!targetNumbers || !Array.isArray(targetNumbers) || targetNumbers.length === 0) {
+            // Check user plan dari table user_plans
+            const activePlan = await this.checkUserPlan(userId);
+            if (!activePlan) {
                 return res.status(400).json({
-                    error: 'targetNumbers must be a non-empty array'
+                    success: false,
+                    error: 'No active plan found'
                 });
             }
 
             if (targetNumbers.length > activePlan.messages_remaining) {
                 return res.status(400).json({
-                    error: 'Insufficient messages remaining in plan'
+                    success: false,
+                    error: 'Insufficient messages remaining in plan',
+                    details: {
+                        required: targetNumbers.length,
+                        remaining: activePlan.messages_remaining
+                    }
                 });
             }
 
-            const activeSessions = await WhatsappService.getAllActiveSessions(userId);
-            console.log(`Found ${activeSessions.length} active sessions for user ${userId}`);
+            // Get available sessions (termasuk shared)
+            const availableSessions = await WhatsappSession.findSessionsForUser(userId);
+            console.log(`Found ${availableSessions.length} available sessions for user ${userId}`);
 
-            if (!activeSessions || activeSessions.length === 0) {
+            if (!availableSessions || availableSessions.length === 0) {
                 return res.status(400).json({
-                    error: 'No active WhatsApp sessions available'
+                    success: false,
+                    error: 'No WhatsApp sessions available'
                 });
             }
 
@@ -265,7 +264,7 @@ class MessageController {
                 totalMessages: targetNumbers.length
             });
 
-            // Start async processing
+            // Start processing
             this.processBulkMessages({
                 bulkId: bulkResult.bulkId,
                 targetNumbers,
@@ -273,16 +272,24 @@ class MessageController {
                 imagePath,
                 baseDelay,
                 intervalDelay,
-                activeSessions,
+                availableSessions,
                 userId
             });
 
             res.json({
+                success: true,
                 message: 'Bulk messages queued for sending',
-                bulkId: bulkResult.bulkId,
-                totalMessages: targetNumbers.length,
-                activeSessionsCount: activeSessions.length,
-                estimatedTimeMinutes: Math.ceil((targetNumbers.length * (baseDelay + intervalDelay/2)) / 60)
+                data: {
+                    bulkId: bulkResult.bulkId,
+                    totalMessages: targetNumbers.length,
+                    activeSessionsCount: availableSessions.length,
+                    estimatedTimeMinutes: Math.ceil((targetNumbers.length * (baseDelay + intervalDelay/2)) / 60),
+                    planDetails: {
+                        planId: activePlan.id,
+                        messagesRemaining: activePlan.messages_remaining - targetNumbers.length,
+                        endDate: activePlan.end_date
+                    }
+                }
             });
 
         } catch (error) {
@@ -299,82 +306,70 @@ class MessageController {
             imagePath,
             baseDelay,
             intervalDelay,
-            activeSessions,
+            availableSessions,
             userId
         } = params;
     
         console.log(`Starting bulk message process for ${targetNumbers.length} numbers`);
         let currentSessionIndex = 0;
         let failedNumbers = [];
-    
+        
         const formattedMessage = MessageFormatter.formatMessage(message);
-
-
+    
         for (let i = 0; i < targetNumbers.length; i++) {
             const targetNumber = targetNumbers[i];
             let sent = false;
             let attempts = 0;
-            const maxAttempts = activeSessions.length;
+            const maxAttempts = availableSessions.length;
     
             while (!sent && attempts < maxAttempts) {
-                const session = activeSessions[currentSessionIndex];
+                const session = availableSessions[currentSessionIndex];
                 
                 try {
                     console.log(`Attempt ${attempts + 1} for ${targetNumber} using session ${session.phone_number}`);
                     
-                    // Calculate current delay for this message
                     const messageDelay = baseDelay + Math.floor(Math.random() * intervalDelay);
-                    console.log(`Waiting ${messageDelay} seconds before sending`);
-                    
-                    // Add delay
                     await new Promise(resolve => setTimeout(resolve, messageDelay * 1000));
                     
-                    // Send message
+                    // Send message (akan otomatis mengurangi message_remaining di user_plans)
                     await WhatsappService.sendMessage(
                         session.phone_number,
                         targetNumber,
                         formattedMessage,
+                        userId,
                         imagePath,
-                        0 // No additional delay needed here
+                        0
                     );
     
-                    // Update message status and details
-                    await Message.updateBulkMessageStatus(bulkId, targetNumber, 'sent', session.id, message, imagePath);
+                    await Message.updateBulkMessageStatus(bulkId, targetNumber, 'sent', session.id, formattedMessage, imagePath);
                     sent = true;
                     console.log(`Successfully sent to ${targetNumber}`);
     
-                    // Record metrics
                     await Metrics.recordMessageSent(userId, session.id);
-    
                 } catch (error) {
-                    console.error(`Failed to send to ${targetNumber} using session ${session.phone_number}:`, error);
+                    console.error(`Failed to send to ${targetNumber}:`, error);
                     attempts++;
                     await Metrics.recordMessageFailed(userId, session.id);
                     
-                    // Try next session
-                    currentSessionIndex = (currentSessionIndex + 1) % activeSessions.length;
+                    currentSessionIndex = (currentSessionIndex + 1) % availableSessions.length;
                     
-                    // If all sessions failed for this number
                     if (attempts === maxAttempts) {
                         failedNumbers.push(targetNumber);
-                        await Message.updateBulkMessageStatus(bulkId, targetNumber, 'failed', null, message, imagePath);
-                        console.log(`All attempts failed for ${targetNumber}`);
+                        await Message.updateBulkMessageStatus(bulkId, targetNumber, 'failed', null, formattedMessage, imagePath);
                     }
                 }
             }
     
-            // Rotate to next session for next number
-            currentSessionIndex = (currentSessionIndex + 1) % activeSessions.length;
+            currentSessionIndex = (currentSessionIndex + 1) % availableSessions.length;
         }
     
-        // Update final bulk status
         console.log(`Bulk message process completed. Failed numbers: ${failedNumbers.length}`);
         await Message.updateBulkStatus(bulkId, {
             failedNumbers,
             completedAt: new Date()
         });
     }
-    
+
     async getBulkStatus(req, res) {
         try {
             const { bulkId } = req.params;
