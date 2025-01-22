@@ -583,32 +583,55 @@ class WhatsappService {
     async sendMessage(sessionPhone, targetNumber, message, userId, imagePath = null, delay = 0) {
         console.log(`Attempting to send message to ${targetNumber} using ${sessionPhone}`);
         let client = this.sessions.get(sessionPhone);
-
+    
         if (!client || !client.info) {
             throw new Error(`Session ${sessionPhone} is not ready`);
         }
-
+    
+        const connection = await pool.getConnection();
         try {
             if (delay > 0) {
                 await new Promise(resolve => setTimeout(resolve, delay * 1000));
             }
-
+    
             const formattedNumber = targetNumber.replace(/[^\d]/g, '');
             const fullNumber = `${formattedNumber}@c.us`;
-
+    
             // Check if number exists on WhatsApp
             const isRegistered = await client.isRegisteredUser(fullNumber);
             if (!isRegistered) {
                 throw new Error(`Number ${targetNumber} is not registered on WhatsApp`);
             }
-
-            // Konversi kode emoji dalam pesan
-            const formattedMessage = this.convertEmojiCodes(message);
-
-            // Decrement message count in user_plans
+    
+            // Get WhatsApp session ID
+            const [sessions] = await connection.query(
+                'SELECT id FROM whatsapp_sessions WHERE phone_number = ?',
+                [sessionPhone]
+            );
+    
+            if (!sessions || sessions.length === 0) {
+                throw new Error('WhatsApp session not found in database');
+            }
+    
+            const sessionId = sessions[0].id;
+    
+            // Create message record first with pending status
+            const [messageResult] = await connection.query(
+                `INSERT INTO messages 
+                (user_id, whatsapp_session_id, target_number, message, image_path, status) 
+                VALUES (?, ?, ?, ?, ?, 'pending')`,
+                [userId, sessionId, targetNumber, message, imagePath]
+            );
+    
+            const messageId = messageResult.insertId;
+    
+            // Decrement message count
             await Message.decrementUserPlan(userId, 1);
-
-            // Send message with or without image
+    
+            // Format pesan dengan emoji jika ada
+            const formattedMessage = this.convertEmojiCodes(message);
+    
+            // Send message
             if (imagePath) {
                 console.log(`Sending message with image: ${imagePath}`);
                 try {
@@ -624,12 +647,28 @@ class WhatsappService {
             } else {
                 await client.sendMessage(fullNumber, formattedMessage);
             }
-
+    
+            // Update message status to sent
+            await connection.query(
+                'UPDATE messages SET status = ?, updated_at = NOW() WHERE id = ?',
+                ['sent', messageId]
+            );
+    
             console.log(`Message sent successfully to ${targetNumber}`);
             return true;
         } catch (error) {
+            // If there's a message record, update it to failed
+            if (messageId) {
+                await connection.query(
+                    'UPDATE messages SET status = ?, updated_at = NOW() WHERE id = ?',
+                    ['failed', messageId]
+                );
+            }
+    
             console.error(`Error sending message:`, error);
             throw error;
+        } finally {
+            connection.release();
         }
     }
 
@@ -661,6 +700,48 @@ class WhatsappService {
             return client.info !== null;
         } catch (error) {
             return false;
+        }
+    }
+
+    async sendMessageWithButton(sessionPhone, targetNumber, message, buttonData, userId, delay = 0) {
+        console.log(`Attempting to send message with link to ${targetNumber} using ${sessionPhone}`);
+        let client = this.sessions.get(sessionPhone);
+    
+        if (!client || !client.info) {
+            throw new Error(`Session ${sessionPhone} is not ready`);
+        }
+    
+        try {
+            if (delay > 0) {
+                await new Promise(resolve => setTimeout(resolve, delay * 1000));
+            }
+    
+            const formattedNumber = targetNumber.replace(/[^\d]/g, '');
+            const fullNumber = `${formattedNumber}@c.us`;
+    
+            // Check if number exists on WhatsApp
+            const isRegistered = await client.isRegisteredUser(fullNumber);
+            if (!isRegistered) {
+                throw new Error(`Number ${targetNumber} is not registered on WhatsApp`);
+            }
+    
+            // Decrement message count
+            await Message.decrementUserPlan(userId, 1);
+    
+            // Format pesan dengan emoji dan tambahkan link
+            const formattedMessage = this.convertEmojiCodes(message);
+            
+            // Buat format pesan yang lebih menarik dengan link
+            const messageWithLink = `${formattedMessage}\n\n${buttonData.buttonText} 👉 ${buttonData.url}\n\n${buttonData.footerText || ''}`;
+    
+            // Kirim pesan
+            await client.sendMessage(fullNumber, messageWithLink);
+    
+            console.log(`Message with link sent successfully to ${targetNumber}`);
+            return true;
+        } catch (error) {
+            console.error(`Error sending message with link:`, error);
+            throw error;
         }
     }
 }

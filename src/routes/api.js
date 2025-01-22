@@ -6,7 +6,9 @@ const whatsappController = require('../controllers/whatsappController');
 const messageController = require('../controllers/messageController');
 const userController = require('../controllers/userController');
 const planController = require('../controllers/planController');
-const paymentController = require('../controllers/paymentController')
+const paymentController = require('../controllers/paymentController');
+const userStatsController = require('../controllers/userStatsController'); // Add this line
+
 /**
  * @swagger
  * components:
@@ -1247,6 +1249,362 @@ router.get('/metrics', auth, isAdmin, whatsappController.getMetrics);
  */
 router.get('/messages/formats', messageController.getFormats);
 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     UserStats:
+ *       type: object
+ *       properties:
+ *         success:
+ *           type: boolean
+ *           example: true
+ *         data:
+ *           type: object
+ *           properties:
+ *             sessions:
+ *               type: object
+ *               properties:
+ *                 active:
+ *                   type: integer
+ *                   description: Number of active WhatsApp sessions
+ *                   example: 2
+ *             messages:
+ *               type: object
+ *               properties:
+ *                 single:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                       example: 100
+ *                       description: Total single messages sent
+ *                     successful:
+ *                       type: integer
+ *                       example: 95
+ *                       description: Successfully sent single messages
+ *                     failed:
+ *                       type: integer
+ *                       example: 5
+ *                       description: Failed single messages
+ *                     success_rate:
+ *                       type: string
+ *                       example: "95.00%"
+ *                       description: Success rate for single messages
+ *                 bulk:
+ *                   type: object
+ *                   properties:
+ *                     campaigns:
+ *                       type: integer
+ *                       example: 10
+ *                       description: Total bulk campaigns created
+ *                     total_messages:
+ *                       type: integer
+ *                       example: 1000
+ *                       description: Total messages in bulk campaigns
+ *                     successful:
+ *                       type: integer
+ *                       example: 980
+ *                       description: Successfully sent bulk messages
+ *                     failed:
+ *                       type: integer
+ *                       example: 20
+ *                       description: Failed bulk messages
+ *                     success_rate:
+ *                       type: string
+ *                       example: "98.00%"
+ *                       description: Success rate for bulk messages
+ *                     last_campaign_date:
+ *                       type: string
+ *                       format: date-time
+ *                       description: Date of the last bulk campaign
+ *                 overall:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                       example: 1100
+ *                       description: Total messages (single + bulk)
+ *                     successful:
+ *                       type: integer
+ *                       example: 1075
+ *                       description: Total successful messages
+ *                     failed:
+ *                       type: integer
+ *                       example: 25
+ *                       description: Total failed messages
+ *                     success_rate:
+ *                       type: string
+ *                       example: "97.73%"
+ *                       description: Overall success rate
+ *             current_plan:
+ *               type: object
+ *               nullable: true
+ *               properties:
+ *                 name:
+ *                   type: string
+ *                   example: "Premium Plan"
+ *                   description: Current active plan name
+ *                 messages_remaining:
+ *                   type: integer
+ *                   example: 5000
+ *                   description: Remaining messages in current plan
+ *                 end_date:
+ *                   type: string
+ *                   format: date-time
+ *                   description: Plan expiry date
+ *             recent_activity:
+ *               type: object
+ *               properties:
+ *                 single_messages:
+ *                   type: array
+ *                   description: Last 5 single messages
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1
+ *                       target_number:
+ *                         type: string
+ *                         example: "628123456789"
+ *                       sender_number:
+ *                         type: string
+ *                         example: "628987654321"
+ *                       status:
+ *                         type: string
+ *                         enum: [pending, sent, failed]
+ *                       created_at:
+ *                         type: string
+ *                         format: date-time
+ *                 bulk_campaigns:
+ *                   type: array
+ *                   description: Last 5 bulk campaigns
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1
+ *                       message_type:
+ *                         type: string
+ *                         enum: [Regular Message, Button Message]
+ *                       total_messages:
+ *                         type: integer
+ *                         example: 100
+ *                       sent_messages:
+ *                         type: integer
+ *                         example: 98
+ *                       status:
+ *                         type: string
+ *                         enum: [processing, completed, partially_completed, failed]
+ *                       created_at:
+ *                         type: string
+ *                         format: date-time
+ *                       preview_message:
+ *                         type: string
+ *                         example: "🎉 PROMO SPESIAL! Dapatkan diskon 50%..."
+ *     ProfileUpdate:
+ *       type: object
+ *       properties:
+ *         username:
+ *           type: string
+ *           description: New username
+ *         email:
+ *           type: string
+ *           format: email
+ *           description: New email address
+ *     PasswordUpdate:
+ *       type: object
+ *       required:
+ *         - currentPassword
+ *         - newPassword
+ *       properties:
+ *         currentPassword:
+ *           type: string
+ *           description: Current password
+ *         newPassword:
+ *           type: string
+ *           description: New password
+ */
+
+/**
+ * @swagger
+ * /api/user/stats:
+ *   get:
+ *     tags: [User Stats]
+ *     summary: Get user statistics including bulk messages
+ *     description: Get comprehensive statistics about user's messaging activities
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Statistics retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/UserStats'
+ *       401:
+ *         description: Unauthorized - Invalid or missing token
+ *       500:
+ *         description: Server error
+ * 
+ * /api/user/profile:
+ *   put:
+ *     tags: [User Stats]
+ *     summary: Update user profile
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ProfileUpdate'
+ *     responses:
+ *       200:
+ *         description: Profile updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Profile updated successfully"
+ *       400:
+ *         description: Invalid input parameters
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
+ * 
+ * /api/user/password:
+ *   put:
+ *     tags: [User Stats]
+ *     summary: Update user password
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/PasswordUpdate'
+ *     responses:
+ *       200:
+ *         description: Password updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Password updated successfully"
+ *       400:
+ *         description: Invalid password or validation error
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
+ */
+
+// Route definitions
+router.get('/user/stats', auth, userStatsController.getUserStats);
+router.put('/user/profile', auth, userStatsController.updateProfile);
+router.put('/user/password', auth, userStatsController.updatePassword);
+
+/**
+ * @swagger
+ * /api/messages/bulk/button:
+ *   post:
+ *     tags: [Messages]
+ *     summary: Send bulk messages with clickable button link
+ *     description: Send WhatsApp messages to multiple recipients with a button that redirects to a URL
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - targetNumbers
+ *               - message
+ *               - buttonText
+ *               - url
+ *             properties:
+ *               targetNumbers:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Array of phone numbers to send the message to
+ *                 example: ["628123456789", "628987654321"]
+ *               message:
+ *                 type: string
+ *                 description: Main message text (supports emoji codes)
+ *                 example: "Special Promo! :fire:\nClick the button below to learn more"
+ *               buttonText:
+ *                 type: string
+ *                 description: Text to display on the button
+ *                 example: "View Offer"
+ *               url:
+ *                 type: string
+ *                 description: URL to redirect to when button is clicked
+ *                 example: "https://example.com/promo"
+ *               footerText:
+ *                 type: string
+ *                 description: Optional text to display below the button
+ *                 example: "Limited time offer"
+ *               baseDelay:
+ *                 type: integer
+ *                 description: Base delay between messages in seconds
+ *                 default: 30
+ *               intervalDelay:
+ *                 type: integer
+ *                 description: Random additional delay between messages
+ *                 default: 10
+ *     responses:
+ *       200:
+ *         description: Messages queued successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     bulkId:
+ *                       type: integer
+ *                     totalMessages:
+ *                       type: integer
+ *                     activeSessionsCount:
+ *                       type: integer
+ *                     estimatedTimeMinutes:
+ *                       type: integer
+ *       400:
+ *         description: Invalid input or insufficient messages in plan
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
+ */
+
+// Add the new route
+router.post('/messages/bulk/button', auth, messageController.sendBulkButtonMessages);
 
 // Route implementation
 router.post('/messages/bulk/send', auth, messageController.sendBulkMessages);

@@ -5,6 +5,8 @@ const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
 const apiRoutes = require('./routes/api');
 const WhatsappService = require('./services/whatsappService');
+const CleanupService = require('./services/cleanupService');
+
 require('dotenv').config();
 
 const app = express();
@@ -61,22 +63,34 @@ process.on('SIGINT', gracefulShutdown);
 
 async function gracefulShutdown() {
     console.log('Received shutdown signal');
-    server.close(async () => {
-        console.log('Server stopped accepting new connections');
-        try {
+    
+    try {
+        // Cleanup auth and cache directories
+        await CleanupService.cleanup();
+        
+        // Disconnect WhatsApp sessions
+        if (WhatsappService.gracefulShutdown) {
             await WhatsappService.gracefulShutdown();
-            console.log('Cleanup completed');
-            process.exit(0);
-        } catch (error) {
-            console.error('Error during cleanup:', error);
-            process.exit(1);
         }
-    });
-
-    setTimeout(() => {
-        console.error('Could not close connections in time, forcefully shutting down');
+        
+        console.log('Cleanup completed, shutting down...');
+        process.exit(0);
+    } catch (error) {
+        console.error('Error during shutdown:', error);
         process.exit(1);
-    }, 30000);
+    }
 }
+
+process.on('uncaughtException', async (error) => {
+    console.error('Uncaught Exception:', error);
+    await CleanupService.cleanup();
+    process.exit(1);
+});
+
+process.on('unhandledRejection', async (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    await CleanupService.cleanup();
+    process.exit(1);
+});
 
 module.exports = app;

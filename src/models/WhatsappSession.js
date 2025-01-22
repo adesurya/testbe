@@ -2,6 +2,52 @@
 const pool = require('../config/database');
 
 class WhatsappSession {
+    // static async create(userId, phoneNumber) {
+    //     const connection = await pool.getConnection();
+    //     try {
+    //         // Check if session already exists
+    //         const [existing] = await connection.query(
+    //             'SELECT * FROM whatsapp_sessions WHERE phone_number = ?',
+    //             [phoneNumber]
+    //         );
+
+    //         if (existing.length > 0) {
+    //             // Update existing session
+    //             await connection.query(
+    //                 'UPDATE whatsapp_sessions SET user_id = ?, status = "inactive", updated_at = NOW() WHERE phone_number = ?',
+    //                 [userId, phoneNumber]
+    //             );
+    //             return existing[0].id;
+    //         }
+
+    //         // Create new session
+    //         const [result] = await connection.query(
+    //             'INSERT INTO whatsapp_sessions (user_id, phone_number, status) VALUES (?, ?, "inactive")',
+    //             [userId, phoneNumber]
+    //         );
+            
+    //         console.log('WhatsApp session created:', { userId, phoneNumber, insertId: result.insertId });
+    //         return result.insertId;
+    //     } finally {
+    //         connection.release();
+    //     }
+    // }
+
+    // static async getAllActiveSessions() {
+    //     const connection = await pool.getConnection();
+    //     try {
+    //         const [sessions] = await connection.query(
+    //             `SELECT ws.*, u.username as owner_username
+    //              FROM whatsapp_sessions ws
+    //              JOIN users u ON ws.user_id = u.id
+    //              WHERE ws.status = 'active' AND ws.is_shared = true`
+    //         );
+    //         return sessions;
+    //     } finally {
+    //         connection.release();
+    //     }
+    // }
+
     static async create(userId, phoneNumber) {
         const connection = await pool.getConnection();
         try {
@@ -17,6 +63,7 @@ class WhatsappSession {
                     'UPDATE whatsapp_sessions SET user_id = ?, status = "inactive", updated_at = NOW() WHERE phone_number = ?',
                     [userId, phoneNumber]
                 );
+                console.log(`Updated existing session for ${phoneNumber}`);
                 return existing[0].id;
             }
 
@@ -26,40 +73,52 @@ class WhatsappSession {
                 [userId, phoneNumber]
             );
             
-            console.log('WhatsApp session created:', { userId, phoneNumber, insertId: result.insertId });
+            console.log(`Created new session for ${phoneNumber}`);
             return result.insertId;
         } finally {
             connection.release();
         }
     }
-
-    static async getAllActiveSessions() {
+    static async getAllActiveSessions(userId) {
         const connection = await pool.getConnection();
         try {
+            console.log('Getting all active sessions');
+            
+            // Ambil semua sesi yang aktif
             const [sessions] = await connection.query(
                 `SELECT ws.*, u.username as owner_username
                  FROM whatsapp_sessions ws
                  JOIN users u ON ws.user_id = u.id
-                 WHERE ws.status = 'active' AND ws.is_shared = true`
+                 WHERE ws.status = 'active'`,
+                []
             );
+            
+            console.log(`Found ${sessions.length} active sessions`);
             return sessions;
         } finally {
             connection.release();
         }
     }
 
+
     static async findSessionsForUser(userId) {
         const connection = await pool.getConnection();
         try {
-            const [rows] = await connection.query(
+            // Get all active sessions, regardless of ownership
+            const [sessions] = await connection.query(
                 `SELECT ws.*, u.username as owner_username
                  FROM whatsapp_sessions ws
                  JOIN users u ON ws.user_id = u.id
-                 WHERE (ws.user_id = ? OR ws.is_shared = true)
-                 AND ws.status = 'active'`,
-                [userId]
+                 WHERE ws.status = 'active'
+                 ORDER BY RAND()`,  // Random order untuk load balancing
+                []
             );
-            return rows;
+
+            console.log(`Found ${sessions.length} active sessions available`);
+            return sessions;
+        } catch (error) {
+            console.error('Error finding sessions:', error);
+            throw error;
         } finally {
             connection.release();
         }

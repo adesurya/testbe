@@ -155,36 +155,41 @@ class Message {
         const connection = await pool.getConnection();
         try {
             await connection.beginTransaction();
-
+    
             // Create bulk record
             const [bulkResult] = await connection.query(
                 `INSERT INTO message_bulks 
-                (user_id, message, image_path, total_messages, status) 
-                VALUES (?, ?, ?, ?, 'processing')`,
-                [bulkData.userId, bulkData.message, bulkData.imagePath, bulkData.totalMessages]
+                (user_id, message, message_type, button_data, image_path, total_messages, status) 
+                VALUES (?, ?, ?, ?, ?, ?, 'processing')`,
+                [
+                    bulkData.userId, 
+                    bulkData.message, 
+                    bulkData.messageType || 'regular',
+                    bulkData.buttonData ? JSON.stringify(bulkData.buttonData) : null,
+                    bulkData.imagePath, 
+                    bulkData.totalMessages
+                ]
             );
-
+    
             const bulkId = bulkResult.insertId;
-
-            // Create individual message records with more details
+    
+            // Create individual message records
             const messageValues = bulkData.targetNumbers.map(number => [
                 bulkId,
                 bulkData.userId,
                 number,
                 bulkData.message,
                 bulkData.imagePath,
-                'pending',
-                new Date(),
-                new Date()
+                'pending'
             ]);
-
+    
             await connection.query(
                 `INSERT INTO bulk_messages 
-                (bulk_id, user_id, target_number, message, image_path, status, created_at, updated_at) 
+                (bulk_id, user_id, target_number, message, image_path, status) 
                 VALUES ?`,
                 [messageValues]
             );
-
+    
             await connection.commit();
             return { bulkId };
         } catch (error) {

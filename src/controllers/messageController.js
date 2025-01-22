@@ -13,9 +13,11 @@ class MessageController {
         this.checkUserPlan = this.checkUserPlan.bind(this);
         this.sendMessage = this.sendMessage.bind(this);
         this.sendBulkMessages = this.sendBulkMessages.bind(this);
+        this.sendBulkButtonMessages = this.sendBulkButtonMessages.bind(this);
         this.getBulkStatus = this.getBulkStatus.bind(this);
         this.processBulkMessages = this.processBulkMessages.bind(this);
         this.getFormats = this.getFormats.bind(this);
+        this.processBulkButtonMessages = this.processBulkButtonMessages.bind(this);
 
     }
 
@@ -573,6 +575,196 @@ class MessageController {
         }
     }
     
+    async sendBulkButtonMessages(req, res) {
+        try {
+            const { 
+                targetNumbers, 
+                message, 
+                buttonText, 
+                url, 
+                footerText,
+                baseDelay = 30, 
+                intervalDelay = 10 
+            } = req.body;
+            const userId = req.user.id;
+
+            // Validate input
+            if (!targetNumbers || !Array.isArray(targetNumbers) || targetNumbers.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'targetNumbers must be a non-empty array'
+                });
+            }
+
+            if (!message || !buttonText || !url) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'message, buttonText, and url are required'
+                });
+            }
+
+            // Validate URL format
+            try {
+                new URL(url);
+            } catch (e) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Invalid URL format'
+                });
+            }
+
+            // Check user plan
+            console.log('Checking plan for user:', userId);
+            const activePlan = await this.checkUserPlan(userId);
+            if (!activePlan) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'No active plan found'
+                });
+            }
+
+            if (targetNumbers.length > activePlan.messages_remaining) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Insufficient messages remaining in plan',
+                    details: {
+                        required: targetNumbers.length,
+                        remaining: activePlan.messages_remaining
+                    }
+                });
+            }
+
+            // Get available sessions
+            const availableSessions = await WhatsappSession.findSessionsForUser(userId);
+            if (!availableSessions || availableSessions.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'No WhatsApp sessions available'
+                });
+            }
+
+            // Create bulk record
+            const bulkResult = await Message.createBulkMessages({
+                userId,
+                targetNumbers,
+                message,
+                messageType: 'button',
+                buttonData: { buttonText, url, footerText },
+                totalMessages: targetNumbers.length
+            });
+
+            // Process messages asynchronously
+            this.processBulkButtonMessages({
+                bulkId: bulkResult.bulkId,
+                targetNumbers,
+                message,
+                buttonData: {
+                    buttonText,
+                    url,
+                    footerText
+                },
+                baseDelay,
+                intervalDelay,
+                availableSessions,
+                userId
+            });
+
+            res.json({
+                success: true,
+                message: 'Bulk button messages queued for sending',
+                data: {
+                    bulkId: bulkResult.bulkId,
+                    totalMessages: targetNumbers.length,
+                    activeSessionsCount: availableSessions.length,
+                    estimatedTimeMinutes: Math.ceil((targetNumbers.length * (baseDelay + intervalDelay/2)) / 60),
+                    plan: {
+                        name: activePlan.plan_name,
+                        remainingMessages: activePlan.messages_remaining - targetNumbers.length
+                    }
+                }
+            });
+
+        } catch (error) {
+            console.error('Error in sendBulkButtonMessages:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
+
+    async processBulkButtonMessages(params) {
+        const {
+            bulkId,
+            targetNumbers,
+            message,
+            buttonData,
+            baseDelay,
+            intervalDelay,
+            availableSessions,
+            userId
+        } = params;
+    
+        console.log(`Starting bulk button message process for ${targetNumbers.length} numbers`);
+        let currentSessionIndex = 0;
+        let failedNumbers = [];
+    
+        for (let i = 0; i < targetNumbers.length; i++) {
+            const targetNumber = targetNumbers[i];
+            let sent = false;
+            let attempts = 0;
+            const maxAttempts = availableSessions.length;
+    
+            while (!sent && attempts < maxAttempts) {
+                const session = availableSessions[currentSessionIndex];
+                
+                try {
+                    console.log(`Attempt ${attempts + 1} for ${targetNumber} using session ${session.phone_number}`);
+                    
+                    const messageDelay = baseDelay + Math.floor(Math.random() * intervalDelay);
+                    await new Promise(resolve => setTimeout(resolve, messageDelay * 1000));
+                    
+                    await WhatsappService.sendMessageWithButton(
+                        session.phone_number,
+                        targetNumber,
+                        message,
+                        buttonData,
+                        userId,
+                        0
+                    );
+    
+                    await Message.updateBulkMessageStatus(bulkId, targetNumber, 'sent', session.id, message);
+                    sent = true;
+                    console.log(`Successfully sent button message to ${targetNumber}`);
+    
+                    await Metrics.recordMessageSent(userId, session.id);
+                } catch (error) {
+                    console.error(`Failed to send to ${targetNumber}:`, error);
+                    attempts++;
+                    await Metrics.recordMessageFailed(userId, session.id);
+                    
+                    currentSessionIndex = (currentSessionIndex + 1) % availableSessions.length;
+                    
+                    if (attempts === maxAttempts) {
+                        failedNumbers.push(targetNumber);
+                        await Message.updateBulkMessageStatus(bulkId, targetNumber, 'failed', null, message);
+                    }
+                }
+            }
+    
+            currentSessionIndex = (currentSessionIndex + 1) % availableSessions.length;
+        }
+    
+        console.log(`Bulk button message process completed. Failed numbers: ${failedNumbers.length}`);
+        await Message.updateBulkStatus(bulkId, {
+            failedNumbers,
+            completedAt: new Date()
+        });
+    }
+
+    
+
+
 }
 const messageController = new MessageController();
 
