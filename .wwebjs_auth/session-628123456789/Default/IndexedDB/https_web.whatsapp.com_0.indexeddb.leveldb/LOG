@@ -1,4 +1,0 @@
-2025/01/23-11:49:01.997 de94 Reusing MANIFEST C:\Users\ade.iskandar\Desktop\Epsilla Prompt\sourcecode-WAMarketing-backend\.wwebjs_auth\session-628123456789\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
-2025/01/23-11:49:01.997 de94 Recovering log #52
-2025/01/23-11:49:02.141 de94 Reusing old log C:\Users\ade.iskandar\Desktop\Epsilla Prompt\sourcecode-WAMarketing-backend\.wwebjs_auth\session-628123456789\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000052.log 
-2025/01/23-11:49:03.729 bdb0 Manual compaction at level-0 from '\x00\x1c\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x1d\x00\x00\x00' @ 0 : 0; will stop at (end)

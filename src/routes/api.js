@@ -10,6 +10,8 @@ const paymentController = require('../controllers/paymentController');
 const adminController = require('../controllers/adminController');
 const userStatsController = require('../controllers/userStatsController'); // Add this line
 const reportController = require('../controllers/reportController');
+const authController = require('../controllers/authController')
+
 
 /**
  * @swagger
@@ -87,6 +89,77 @@ const reportController = require('../controllers/reportController');
  *         description: Invalid credentials
  */
 router.post('/auth/login', userController.login);
+
+/**
+ * @swagger
+ * /api/auth/google:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Sign in/up with Google
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - idToken
+ *             properties:
+ *               idToken:
+ *                 type: string
+ *                 description: Google OAuth ID token
+ *     responses:
+ *       200:
+ *         description: Successfully authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 token:
+ *                   type: string
+ *                 user:
+ *                   type: object
+ */
+
+router.post('/auth/google', authController.googleSignIn);
+
+/**
+ * @swagger
+ * /api/auth/register:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Register new user
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - username
+ *               - email
+ *               - password
+ *             properties:
+ *               username:
+ *                 type: string
+ *                 minLength: 3
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               password:
+ *                 type: string
+ *                 minLength: 6
+ *     responses:
+ *       201:
+ *         description: User registered successfully
+ *       400:
+ *         description: Invalid input or duplicate username/email
+ *       500:
+ *         description: Server error
+ */
+
+router.post('/auth/register', userController.register);
 
 /**
  * @swagger

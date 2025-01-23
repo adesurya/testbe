@@ -4,6 +4,75 @@ const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
 
 class UserController {
+
+    async register(req, res) {
+        const connection = await pool.getConnection();
+        try {
+            const { username, email, password } = req.body;
+     
+            // Validate input
+            if (!username || !email || !password) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Username, email and password are required'
+                });
+            }
+     
+            // Check if username exists
+            const [existingUsername] = await connection.query(
+                'SELECT id FROM users WHERE username = ?',
+                [username]
+            );
+     
+            if (existingUsername.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Username already exists'
+                });
+            }
+     
+            // Check if email exists
+            const [existingEmail] = await connection.query(
+                'SELECT id FROM users WHERE email = ?',
+                [email]
+            );
+     
+            if (existingEmail.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Email already exists'
+                });
+            }
+     
+            // Hash password
+            const hashedPassword = await bcrypt.hash(password, 10);
+     
+            // Create user
+            const [result] = await connection.query(
+                'INSERT INTO users (username, email, password, role, status) VALUES (?, ?, ?, "user", "active")',
+                [username, email, hashedPassword]
+            );
+     
+            res.status(201).json({
+                success: true,
+                message: 'User registered successfully',
+                data: {
+                    id: result.insertId,
+                    username,
+                    email
+                }
+            });
+        } catch (error) {
+            console.error('Error in register:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        } finally {
+            connection.release();
+        }
+     }
+
     // Login untuk user dan admin
     async login(req, res) {
         try {
