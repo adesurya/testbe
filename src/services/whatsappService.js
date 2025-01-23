@@ -744,6 +744,28 @@ class WhatsappService {
             throw error;
         }
     }
+
+    async disconnectSession(phoneNumber) {
+        try {
+            const client = this.sessions.get(phoneNumber);
+            if (client) {
+                await client.destroy();
+                this.sessions.delete(phoneNumber);
+                console.log(`WhatsApp client destroyed for ${phoneNumber}`);
+            }
+            
+            // Clean up auth files
+            const sessionPath = path.join(process.cwd(), '.wwebjs_auth', `session-${phoneNumber}`);
+            await this.safeRemoveDir(sessionPath);
+            
+            return true;
+        } catch (error) {
+            console.error(`Error disconnecting session ${phoneNumber}:`, error);
+            throw error;
+        }
+    }
+    
+
 }
 
 module.exports = new WhatsappService();

@@ -1,11 +1,4 @@
-2025/01/22-19:56:16.416 9b80 Reusing MANIFEST C:\Users\ade.iskandar\Desktop\Epsilla Prompt\sourcecode-WAMarketing-backend\.wwebjs_auth\session-628123456789\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
-2025/01/22-19:56:16.418 9b80 Recovering log #48
-2025/01/22-19:56:16.421 9b80 Reusing old log C:\Users\ade.iskandar\Desktop\Epsilla Prompt\sourcecode-WAMarketing-backend\.wwebjs_auth\session-628123456789\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000048.log 
-2025/01/22-19:56:19.350 10374 Level-0 table #53: started
-2025/01/22-19:56:19.372 10374 Level-0 table #53: 23740 bytes OK
-2025/01/22-19:56:19.376 10374 Delete type=0 #48
-2025/01/22-19:56:19.378 10374 Manual compaction at level-0 from '\x00\x19\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x1a\x00\x00\x00' @ 0 : 0; will stop at (end)
-2025/01/22-19:56:22.963 a780 Compacting 1@1 + 1@2 files
-2025/01/22-19:56:23.105 a780 Generated table #54@1: 41113 keys, 1836746 bytes
-2025/01/22-19:56:23.105 a780 Compacted 1@1 + 1@2 files => 1836746 bytes
-2025/01/22-19:56:23.106 a780 compacted to: files[ 0 0 1 0 0 0 0 ]
+2025/01/23-11:49:01.997 de94 Reusing MANIFEST C:\Users\ade.iskandar\Desktop\Epsilla Prompt\sourcecode-WAMarketing-backend\.wwebjs_auth\session-628123456789\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/01/23-11:49:01.997 de94 Recovering log #52
+2025/01/23-11:49:02.141 de94 Reusing old log C:\Users\ade.iskandar\Desktop\Epsilla Prompt\sourcecode-WAMarketing-backend\.wwebjs_auth\session-628123456789\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000052.log 
+2025/01/23-11:49:03.729 bdb0 Manual compaction at level-0 from '\x00\x1c\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x1d\x00\x00\x00' @ 0 : 0; will stop at (end)

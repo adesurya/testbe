@@ -7,7 +7,9 @@ const messageController = require('../controllers/messageController');
 const userController = require('../controllers/userController');
 const planController = require('../controllers/planController');
 const paymentController = require('../controllers/paymentController');
+const adminController = require('../controllers/adminController');
 const userStatsController = require('../controllers/userStatsController'); // Add this line
+const reportController = require('../controllers/reportController');
 
 /**
  * @swagger
@@ -1605,6 +1607,310 @@ router.put('/user/password', auth, userStatsController.updatePassword);
 
 // Add the new route
 router.post('/messages/bulk/button', auth, messageController.sendBulkButtonMessages);
+
+/**
+ * @swagger
+ * tags:
+ *   - name: Auth
+ *     description: Authentication endpoints
+ *   - name: Admin
+ *     description: Admin-only operations for managing system data
+ *   - name: WhatsApp
+ *     description: WhatsApp session management
+ *   - name: Messages
+ *     description: Message operations
+ *   - name: Plans
+ *     description: Plan management
+ *   - name: User Stats
+ *     description: User statistics and profile management
+ */
+
+/**
+ * @swagger
+ * components:
+ *   securitySchemes:
+ *     bearerAuth:
+ *       type: http
+ *       scheme: bearer
+ *       bearerFormat: JWT
+ */
+
+/**
+ * @swagger
+ * /api/admin/whatsapp-sessions:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get all WhatsApp sessions
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of all WhatsApp sessions with stats
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                       phone_number:
+ *                         type: string
+ *                       status:
+ *                         type: string
+ *                       owner_username:
+ *                         type: string
+ *                       total_messages:
+ *                         type: integer
+ *                       sent_messages:
+ *                         type: integer
+ *                       failed_messages:
+ *                         type: integer
+ *
+ * /api/admin/whatsapp-sessions/{sessionId}:
+ *   delete:
+ *     tags: [Admin]
+ *     summary: Delete a WhatsApp session
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Session deleted successfully
+ *
+ * /api/admin/bulk-messages:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get all bulk messages
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *         default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         default: 10
+ *     responses:
+ *       200:
+ *         description: List of bulk messages with pagination
+ *
+ * /api/admin/bulk-messages/{id}:
+ *   delete:
+ *     tags: [Admin]
+ *     summary: Delete a bulk message
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Bulk message deleted successfully
+ *
+ * /api/admin/message-bulks:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get all message bulks
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: List of message bulks with statistics
+ *
+ * /api/admin/message-bulks/{id}:
+ *   delete:
+ *     tags: [Admin]
+ *     summary: Delete a message bulk and its associated messages
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Message bulk deleted successfully
+ *
+ * /api/admin/messages:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get all messages
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: List of messages with sender details
+ *
+ * /api/admin/messages/{id}:
+ *   delete:
+ *     tags: [Admin]
+ *     summary: Delete a message
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Message deleted successfully
+ *
+ * /api/admin/metrics:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get all metrics
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: List of metrics with user details
+ *
+ * /api/admin/metrics/{id}:
+ *   delete:
+ *     tags: [Admin]
+ *     summary: Delete a metric
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Metric deleted successfully
+ */
+
+// Admin routes
+router.get('/admin/whatsapp-sessions', auth, isAdmin, adminController.getWhatsappSessions);
+router.delete('/admin/whatsapp-sessions/:sessionId', auth, isAdmin, adminController.deleteWhatsappSession);
+router.get('/admin/bulk-messages', auth, isAdmin, adminController.getBulkMessages);
+router.delete('/admin/bulk-messages/:id', auth, isAdmin, adminController.deleteBulkMessage);
+router.get('/admin/message-bulks', auth, isAdmin, adminController.getMessageBulks);
+router.delete('/admin/message-bulks/:id', auth, isAdmin, adminController.deleteMessageBulk);
+router.get('/admin/messages', auth, isAdmin, adminController.getMessages);
+router.delete('/admin/messages/:id', auth, isAdmin, adminController.deleteMessage);
+router.get('/admin/metrics', auth, isAdmin, adminController.getMetrics);
+router.delete('/admin/metrics/:id', auth, isAdmin, adminController.deleteMetric);
+
+
+/**
+ * @swagger
+ * /api/reports/transactions:
+ *   get:
+ *     tags: [Reports]
+ *     summary: Get transaction report
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Filter by start date (YYYY-MM-DD)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Filter by end date (YYYY-MM-DD)
+ *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: integer
+ *         description: Filter by user ID
+ *       - in: query
+ *         name: transactionType
+ *         schema:
+ *           type: string
+ *           enum: [purchase, topup]
+ *         description: Filter by transaction type
+ *       - in: query
+ *         name: paymentMethod
+ *         schema:
+ *           type: string
+ *           enum: [online, offline]
+ *         description: Filter by payment method
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *     responses:
+ *       200:
+ *         description: Transaction report data
+ * 
+ * /api/reports/transactions/summary:
+ *   get:
+ *     tags: [Reports]
+ *     summary: Get transaction summary
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Transaction summary data grouped by month and payment method
+ */
+
+// Add these routes to your api.js
+router.get('/reports/transactions', auth, isAdmin, reportController.getTransactionReport);
+router.get('/reports/transactions/summary', auth, isAdmin, reportController.getTransactionSummary);
 
 // Route implementation
 router.post('/messages/bulk/send', auth, messageController.sendBulkMessages);

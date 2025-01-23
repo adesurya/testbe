@@ -68,42 +68,55 @@ class PaymentController {
     }
 
     async handleCallback(req, res) {
-        console.log('Callback received:', req.body);
+        const connection = await pool.getConnection();
         try {
-            const { 
-                merchantOrderId, 
-                resultCode,
-                amount,
-                reference 
-            } = req.body;
-
-            // Ambil data payment
+            const { merchantOrderId, resultCode, amount, reference } = req.body;
+    
+            await connection.beginTransaction();
+    
+            // Get payment data
             const payment = await Payment.getByMerchantOrderId(merchantOrderId);
             if (!payment) {
-                console.error('Payment not found:', merchantOrderId);
-                return res.status(404).send('Payment not found');
+                throw new Error('Payment not found');
             }
-
-            // Update status berdasarkan resultCode
+    
+            // Update payment status
             let newStatus = 'pending';
             if (resultCode === '00') {
                 newStatus = 'paid';
                 
-                // Jika payment sukses, assign plan ke user
+                // Create plan transaction record
+                await connection.query(
+                    `INSERT INTO plan_transactions 
+                    (user_id, plan_id, transaction_type, amount, payment_method, payment_status, messages_added) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        payment.user_id,
+                        payment.plan_id,
+                        'purchase',
+                        payment.amount,
+                        'online',
+                        'completed',
+                        payment.message_limit
+                    ]
+                );
+    
+                // Assign plan to user
                 await Plan.assignToUser(payment.user_id, payment.plan_id, amount);
-                console.log('Plan assigned to user:', payment.user_id);
             } else if (['01', '02'].includes(resultCode)) {
                 newStatus = 'failed';
             }
-
-            // Update payment status
+    
             await Payment.updateStatus(merchantOrderId, newStatus, reference);
-            console.log('Payment status updated to:', newStatus);
-
+            await connection.commit();
+    
             res.send('OK');
         } catch (error) {
+            await connection.rollback();
             console.error('Error handling callback:', error);
             res.status(500).send('Error processing callback');
+        } finally {
+            connection.release();
         }
     }
 

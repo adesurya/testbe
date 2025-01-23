@@ -1,0 +1,56 @@
+Penjelasan fungsi setiap tabel:
+
+1. `bulk_messages`:
+- Menyimpan detail setiap pesan individual dalam kampanye bulk
+- Fields: bulk_id, user_id, target_number, message, status (pending/sent/failed)
+- Terhubung ke message_bulks melalui bulk_id
+
+2. `message_bulks`:
+- Menyimpan informasi kampanye bulk message
+- Fields: user_id, message, message_type (regular/button), total_messages, status
+- Satu record = satu kampanye bulk
+
+3. `message_usage_log`:
+- Mencatat histori penggunaan pesan per user
+- Fields: user_id, plan_id, message_type, created_at
+- Tracking penggunaan plan
+
+4. `messages`:
+- Menyimpan pesan individual (non-bulk)
+- Fields: user_id, whatsapp_session_id, target_number, message, status
+- Tracking semua pesan single
+
+5. `metrics`:
+- Statistik penggunaan per user dan session
+- Fields: user_id, whatsapp_session_id, message_count, success_count, failed_count
+- Analisis performa
+
+6. `payments`:
+- Record transaksi pembayaran
+- Fields: user_id, plan_id, amount, status, payment_method, reference
+- Integrasi dengan payment gateway
+
+7. `plan_transactions`:
+- Histori transaksi plan
+- Fields: user_id, plan_id, transaction_type (purchase/topup), amount
+- Tracking pembelian dan topup
+
+8. `plans`:
+- Master data paket
+- Fields: name, message_limit, price, duration_days
+- Definisi paket yang tersedia
+
+9. `user_plans`:
+- Paket aktif user
+- Fields: user_id, plan_id, messages_remaining, start_date, end_date
+- Manajemen kuota pesan
+
+10. `users`:
+- Data pengguna sistem
+- Fields: username, password, email, role (admin/user)
+- Autentikasi dan autorisasi
+
+11. `whatsapp_sessions`:
+- Sesi WhatsApp aktif
+- Fields: user_id, phone_number, status
+- Manajemen koneksi WhatsApp
