@@ -1916,16 +1916,19 @@ router.get('/reports/transactions/summary', auth, isAdmin, reportController.getT
  * @swagger
  * /api/payments/methods/{planId}:
  *   get:
- *     tags: [Payments]
+ *     tags:
+ *       - Payments
  *     summary: Get available payment methods for a plan
+ *     description: Returns list of available payment methods with fees from Duitku
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: planId
  *         required: true
  *         schema:
  *           type: integer
- *     security:
- *       - bearerAuth: []
+ *         description: ID of the plan
  *     responses:
  *       200:
  *         description: List of payment methods
@@ -1937,28 +1940,24 @@ router.get('/reports/transactions/summary', auth, isAdmin, reportController.getT
  *                 success:
  *                   type: boolean
  *                 data:
- *                   type: object
- *                   properties:
- *                     responseCode:
- *                       type: string
- *                     responseMessage:
- *                       type: string
- *                     paymentFee:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           paymentMethod:
- *                             type: string
- *                           paymentName:
- *                             type: string
- *                           totalFee:
- *                             type: number
- * 
- * /api/payments/transaction:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/PaymentMethod'
+ *       404:
+ *         description: Plan not found
+ *       500:
+ *         description: Server error
+ */
+router.get('/payments/methods/:planId', auth, paymentController.getPaymentMethods);
+
+/**
+ * @swagger
+ * /api/payments/create:
  *   post:
- *     tags: [Payments]
- *     summary: Create payment transaction
+ *     tags:
+ *       - Payments
+ *     summary: Create a new payment transaction
+ *     description: Initiates a payment transaction with Duitku
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -1977,7 +1976,7 @@ router.get('/reports/transactions/summary', auth, isAdmin, reportController.getT
  *                 type: string
  *     responses:
  *       200:
- *         description: Transaction created
+ *         description: Payment transaction created successfully
  *         content:
  *           application/json:
  *             schema:
@@ -1986,19 +1985,106 @@ router.get('/reports/transactions/summary', auth, isAdmin, reportController.getT
  *                 success:
  *                   type: boolean
  *                 data:
- *                   type: object
- *                   properties:
- *                     merchantOrderId:
- *                       type: string
- *                     reference:
- *                       type: string
- *                     paymentUrl:
- *                       type: string
- * 
+ *                   $ref: '#/components/schemas/PaymentTransaction'
+ *       400:
+ *         description: Invalid request parameters
+ *       404:
+ *         description: Plan not found
+ *       500:
+ *         description: Server error
+ */
+router.post('/payments/create', auth, paymentController.createTransaction);
+
+/**
+ * @swagger
+ * /api/payments/status/{merchantOrderId}:
+ *   get:
+ *     tags:
+ *       - Payments
+ *     summary: Get payment transaction status
+ *     description: Get detailed status of a payment transaction
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: merchantOrderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Merchant order ID of the transaction
+ *     responses:
+ *       200:
+ *         description: Payment status details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/PaymentTransaction'
+ *       403:
+ *         description: Unauthorized access
+ *       404:
+ *         description: Transaction not found
+ */
+router.get('/payments/status/:merchantOrderId', auth, paymentController.getPaymentStatus);
+
+/**
+ * @swagger
+ * /api/payments/history:
+ *   get:
+ *     tags:
+ *       - Payments
+ *     summary: Get user's payment history
+ *     description: Returns list of user's payment transactions
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *         description: Page number for pagination
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: Number of items per page
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [pending, paid, failed, expired]
+ *         description: Filter by payment status
+ *     responses:
+ *       200:
+ *         description: Payment history retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/PaymentTransaction'
+ *                 pagination:
+ *                   $ref: '#/components/schemas/Pagination'
+ */
+router.get('/payments/history', auth, paymentController.getPaymentHistory);
+
+/**
+ * @swagger
  * /api/payments/callback:
  *   post:
- *     tags: [Payments]
- *     summary: Payment callback from Duitku
+ *     tags:
+ *       - Payments
+ *     summary: Handle payment gateway callback
+ *     description: Endpoint for Duitku to send payment notifications
  *     requestBody:
  *       required: true
  *       content:
@@ -2009,7 +2095,8 @@ router.get('/reports/transactions/summary', auth, isAdmin, reportController.getT
  *               - merchantCode
  *               - amount
  *               - merchantOrderId
- *               - resultCode
+ *               - reference
+ *               - signature
  *             properties:
  *               merchantCode:
  *                 type: string
@@ -2017,26 +2104,257 @@ router.get('/reports/transactions/summary', auth, isAdmin, reportController.getT
  *                 type: string
  *               merchantOrderId:
  *                 type: string
+ *               productDetail:
+ *                 type: string
+ *               additionalParam:
+ *                 type: string
+ *               paymentMethod:
+ *                 type: string
  *               resultCode:
+ *                 type: string
+ *               merchantUserId:
  *                 type: string
  *               reference:
  *                 type: string
+ *               signature:
+ *                 type: string
  *     responses:
  *       200:
- *         description: OK
- * 
+ *         description: Callback processed successfully
+ *       400:
+ *         description: Invalid callback data
+ */
+router.post('/payments/callback', paymentController.handleCallback);
+
+/**
+ * @swagger
  * /api/payments/return:
  *   get:
- *     tags: [Payments]
- *     summary: Return URL after payment
+ *     tags:
+ *       - Payments
+ *     summary: Handle payment return URL
+ *     description: Endpoint for user redirect after payment process
  *     parameters:
  *       - in: query
  *         name: merchantOrderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: resultCode
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: reference
  *         schema:
  *           type: string
  *     responses:
  *       302:
- *         description: Redirect to frontend payment status page
+ *         description: Redirect to success/failure page
+ */
+router.get('/payments/return', paymentController.handleReturn);
+
+// Admin Routes
+/**
+ * @swagger
+ * /api/admin/payments:
+ *   get:
+ *     tags:
+ *       - Admin
+ *       - Payments
+ *     summary: Get all payment transactions (Admin only)
+ *     description: Returns list of all payment transactions with filters
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *     responses:
+ *       200:
+ *         description: List of payment transactions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/PaymentTransaction'
+ *                 pagination:
+ *                   $ref: '#/components/schemas/Pagination'
+ */
+router.get('/admin/payments', auth, isAdmin, paymentController.getAllPayments);
+
+/**
+ * @swagger
+ * /api/admin/payments/statistics:
+ *   get:
+ *     tags:
+ *       - Admin
+ *       - Payments
+ *     summary: Get payment statistics (Admin only)
+ *     description: Returns payment statistics and analytics data
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *     responses:
+ *       200:
+ *         description: Payment statistics retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/PaymentStatistics'
+ */
+router.get('/admin/payments/statistics', auth, isAdmin, paymentController.getPaymentStatistics);
+
+/**
+ * @swagger
+ * /api/admin/payments/{merchantOrderId}/retry-callback:
+ *   post:
+ *     tags:
+ *       - Admin
+ *       - Payments
+ *     summary: Manually retry payment callback (Admin only)
+ *     description: Manually retry processing a payment callback
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: merchantOrderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Callback retry processed successfully
+ *       404:
+ *         description: Transaction not found
+ */
+router.post('/admin/payments/:merchantOrderId/retry-callback', auth, isAdmin, paymentController.retryCallback);
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     PaymentMethod:
+ *       type: object
+ *       properties:
+ *         paymentMethod:
+ *           type: string
+ *         paymentName:
+ *           type: string
+ *         paymentImage:
+ *           type: string
+ *         totalFee:
+ *           type: number
+ *         type:
+ *           type: string
+ * 
+ *     PaymentTransaction:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *         userId:
+ *           type: integer
+ *         planId:
+ *           type: integer
+ *         merchantOrderId:
+ *           type: string
+ *         reference:
+ *           type: string
+ *         amount:
+ *           type: number
+ *         paymentMethod:
+ *           type: string
+ *         paymentUrl:
+ *           type: string
+ *         status:
+ *           type: string
+ *           enum: [pending, paid, expired, failed]
+ *         paymentDetails:
+ *           type: object
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
+ * 
+ *     PaymentStatistics:
+ *       type: object
+ *       properties:
+ *         totalTransactions:
+ *           type: integer
+ *         successfulPayments:
+ *           type: integer
+ *         failedPayments:
+ *           type: integer
+ *         totalRevenue:
+ *           type: number
+ *         averageTransactionValue:
+ *           type: number
+ *         paymentMethodBreakdown:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               method:
+ *                 type: string
+ *               count:
+ *                 type: integer
+ *               amount:
+ *                 type: number
+ *
+ *     Pagination:
+ *       type: object
+ *       properties:
+ *         total:
+ *           type: integer
+ *         perPage:
+ *           type: integer
+ *         currentPage:
+ *           type: integer
+ *         lastPage:
+ *           type: integer
  */
 
 // Route implementation

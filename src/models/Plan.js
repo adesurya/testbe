@@ -277,16 +277,7 @@ class Plan {
     }
 
     static async getById(planId) {
-        const connection = await pool.getConnection();
-        try {
-            const [rows] = await connection.query(
-                'SELECT * FROM plans WHERE id = ? AND status = "active"',
-                [planId]
-            );
-            return rows[0];
-        } finally {
-            connection.release();
-        }
+        return this.findById(planId); // Alias for backward compatibility
     }
 
     static async getAll() {
@@ -386,6 +377,19 @@ class Plan {
                     durationDays: plan.duration_days
                 }))
             };
+        } finally {
+            connection.release();
+        }
+    }
+
+    static async findById(planId) {
+        const connection = await pool.getConnection();
+        try {
+            const [rows] = await connection.query(
+                'SELECT * FROM plans WHERE id = ? AND status = "active"',
+                [planId]
+            );
+            return rows[0];
         } finally {
             connection.release();
         }

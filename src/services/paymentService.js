@@ -1,153 +1,222 @@
 // src/services/paymentService.js
-
 const axios = require('axios');
 const crypto = require('crypto');
 const moment = require('moment');
 
-class PaymentService {
+class DuitkuPaymentService {
     constructor() {
+        // Validate required environment variables first
+        const requiredEnvVars = {
+            DUITKU_MERCHANT_CODE: process.env.DUITKU_MERCHANT_CODE,
+            DUITKU_API_KEY: process.env.DUITKU_API_KEY,
+            DUITKU_CALLBACK_URL: process.env.DUITKU_CALLBACK_URL,
+            DUITKU_RETURN_URL: process.env.DUITKU_RETURN_URL
+        };
+
+        const missingVars = Object.entries(requiredEnvVars)
+            .filter(([_, value]) => !value)
+            .map(([key]) => key);
+
+        if (missingVars.length > 0) {
+            throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+        }
+
+        this.baseUrl = process.env.DUITKU_BASE_URL || 'https://sandbox.duitku.com/webapi/api/merchant';
         this.merchantCode = process.env.DUITKU_MERCHANT_CODE;
         this.apiKey = process.env.DUITKU_API_KEY;
-        this.baseUrl = process.env.DUITKU_BASE_URL || 'https://sandbox.duitku.com/webapi/api/merchant';
-        this.callbackUrl = process.env.FRONTEND_URL + '/api/payments/callback';
-        this.returnUrl = process.env.FRONTEND_URL + '/api/payments/return';
+        this.callbackUrl = process.env.DUITKU_CALLBACK_URL;
+        this.returnUrl = process.env.DUITKU_RETURN_URL;
+        this.expiryPeriod = 60; // 1 hour expiry default
+
+        // Setup axios instance with default config
+        this.axiosInstance = axios.create({
+            baseURL: this.baseUrl,
+            timeout: 10000,
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+        });
+
+        // Add request interceptor for logging
+        this.axiosInstance.interceptors.request.use(
+            (config) => {
+                console.log('[Duitku] Request:', {
+                    url: config.url,
+                    method: config.method,
+                    data: this.sanitizeLogData(config.data)
+                });
+                return config;
+            },
+            (error) => {
+                console.error('[Duitku] Request Error:', error);
+                return Promise.reject(error);
+            }
+        );
+
+        // Add response interceptor for logging
+        this.axiosInstance.interceptors.response.use(
+            (response) => {
+                console.log('[Duitku] Response:', {
+                    status: response.status,
+                    data: this.sanitizeLogData(response.data)
+                });
+                return response;
+            },
+            (error) => {
+                console.error('[Duitku] Response Error:', {
+                    status: error.response?.status,
+                    data: error.response?.data,
+                    message: error.message
+                });
+                return Promise.reject(error);
+            }
+        );
     }
 
-    generateSignature(merchantCode, amount, datetime, apiKey) {
-        const signatureText = merchantCode + amount + datetime + apiKey;
-        return crypto.createHash('sha256').update(signatureText).digest('hex');
+    sanitizeLogData(data) {
+        const sensitiveFields = ['signature', 'apiKey', 'email', 'phoneNumber'];
+        if (typeof data !== 'object' || data === null) return data;
+
+        return Object.entries(data).reduce((acc, [key, value]) => {
+            if (sensitiveFields.includes(key)) {
+                acc[key] = '***';
+            } else if (typeof value === 'object') {
+                acc[key] = this.sanitizeLogData(value);
+            } else {
+                acc[key] = value;
+            }
+            return acc;
+        }, {});
     }
 
+    generateSignature(params) {
+        const { type, ...data } = params;
+        let signatureString = '';
 
-    async getPaymentMethods({ amount }) {
         try {
-            const datetime = moment().format('YYYY-MM-DD HH:mm:ss');
-            const signature = crypto.createHash('sha256')
-                .update(this.merchantCode + amount + datetime + this.apiKey)
-                .digest('hex');
+            switch (type) {
+                case 'GET_PAYMENT_METHODS':
+                    signatureString = `${this.merchantCode}${data.amount}${data.datetime}${this.apiKey}`;
+                    console.log('[Duitku] Generating GET_PAYMENT_METHODS signature with:', {
+                        merchantCode: this.merchantCode,
+                        amount: data.amount,
+                        datetime: data.datetime,
+                        signatureString: '***'
+                    });
+                    return crypto.createHash('sha256').update(signatureString).digest('hex');
 
-            const payload = {
-                merchantCode: this.merchantCode,
-                amount: amount,
-                datetime: datetime,
-                signature: signature
-            };
+                case 'CREATE_TRANSACTION':
+                    signatureString = `${this.merchantCode}${data.merchantOrderId}${data.amount}${this.apiKey}`;
+                    console.log('[Duitku] Generating CREATE_TRANSACTION signature with:', {
+                        merchantCode: this.merchantCode,
+                        merchantOrderId: data.merchantOrderId,
+                        amount: data.amount,
+                        signatureString: '***'
+                    });
+                    return crypto.createHash('md5').update(signatureString).digest('hex');
 
-            const response = await axios.post(`${this.baseUrl}/paymentmethod/getpaymentmethod`, payload);
-            return response.data;
+                default:
+                    throw new Error(`Invalid signature type: ${type}`);
+            }
         } catch (error) {
-            console.error('Error getting payment methods:', error.response?.data || error);
+            console.error('[Duitku] Error generating signature:', error);
             throw error;
         }
     }
 
-    async createTransaction(data) {
+    async createTransaction(params) {
         try {
-            const merchantOrderId = moment().format('x'); // timestamp
-            const signature = crypto.createHash('md5')
-                .update(this.merchantCode + merchantOrderId + data.amount + this.apiKey)
-                .digest('hex');
-
-            const payload = {
-                merchantCode: this.merchantCode,
-                paymentAmount: data.amount,
-                paymentMethod: data.paymentMethod,
-                merchantOrderId: merchantOrderId,
-                productDetails: data.productDetails,
-                customerVaName: data.customerName,
-                email: data.email,
-                phoneNumber: data.phoneNumber,
-                callbackUrl: this.callbackUrl,
-                returnUrl: this.returnUrl,
-                signature: signature,
-                expiryPeriod: 60, // 1 hour expiry
-                customerDetail: {
-                    firstName: data.customerName,
-                    email: data.email,
-                    phoneNumber: data.phoneNumber,
-                    billingAddress: {
-                        firstName: data.customerName,
-                        phone: data.phoneNumber,
-                        countryCode: "ID"
-                    }
-                }
-            };
-
-            const response = await axios.post(`${this.baseUrl}/v2/inquiry`, payload);
-            return {
-                ...response.data,
-                merchantOrderId
-            };
-        } catch (error) {
-            console.error('Error creating transaction:', error.response?.data || error);
-            throw error;
-        }
-    }
-
-    async createPaymentRequest(paymentData) {
-        try {
-            const merchantOrderId = moment().valueOf().toString(); // timestamp as order ID
+            const merchantOrderId = moment().format('YYYYMMDDHHmmss') + Math.random().toString(36).substring(2, 7);
+            const amount = Math.round(params.amount); // Ensure amount is integer
+            
             const signature = this.generateSignature({
-                merchantOrderId: merchantOrderId,
-                amount: paymentData.amount
-            }, 'md5');
+                type: 'CREATE_TRANSACTION',
+                merchantOrderId,
+                amount
+            });
+
+            console.log('[Duitku] Creating transaction:', {
+                merchantOrderId,
+                amount,
+                paymentMethod: params.paymentMethod
+            });
 
             const payload = {
                 merchantCode: this.merchantCode,
-                paymentAmount: paymentData.amount,
-                paymentMethod: paymentData.paymentMethod,
-                merchantOrderId: merchantOrderId,
-                productDetails: `Payment for ${paymentData.planName}`,
-                email: paymentData.email,
-                phoneNumber: paymentData.phoneNumber,
-                customerVaName: paymentData.customerName,
+                merchantOrderId,
+                paymentAmount: amount,
+                paymentMethod: params.paymentMethod,
+                productDetails: params.productDetails,
+                email: params.email,
+                customerVaName: params.customerName,
                 callbackUrl: this.callbackUrl,
                 returnUrl: this.returnUrl,
-                signature: signature,
-                expiryPeriod: 60, // 1 hour
-                customerDetail: {
-                    firstName: paymentData.customerName,
-                    email: paymentData.email,
-                    phoneNumber: paymentData.phoneNumber
-                }
+                signature
             };
 
-            const response = await axios.post(`${this.baseUrl}/v2/inquiry`, payload);
+            const response = await this.axiosInstance.post('/v2/inquiry', payload);
+
+            if (!response.data || !response.data.paymentUrl) {
+                throw new Error('Invalid response from Duitku');
+            }
+
             return {
                 ...response.data,
                 merchantOrderId
             };
         } catch (error) {
-            console.error('Error creating payment:', error.response?.data || error.message);
-            throw error;
+            console.error('[Duitku] Transaction creation error:', {
+                error: error.message,
+                response: error.response?.data,
+                stack: error.stack
+            });
+
+            if (error.response?.status === 401) {
+                throw new DuitkuPaymentError(
+                    'Authentication failed. Please check MERCHANT_CODE and API_KEY.',
+                    error
+                );
+            }
+
+            throw new DuitkuPaymentError(
+                error.response?.data?.Message || 'Failed to create transaction',
+                error
+            );
         }
     }
 
-    async checkPaymentStatus(merchantOrderId) {
+    async checkTransactionStatus(merchantOrderId) {
         try {
-            const signature = this.generateSignature({ merchantOrderId }, 'md5');
+            const signature = this.generateSignature({
+                type: 'CHECK_TRANSACTION',
+                merchantOrderId
+            });
 
-            const response = await axios.post(`${this.baseUrl}/transactionStatus`, {
+            const response = await this.axiosInstance.post('/transactionStatus', {
                 merchantCode: this.merchantCode,
-                merchantOrderId: merchantOrderId,
-                signature: signature
+                merchantOrderId,
+                signature
             });
 
             return response.data;
         } catch (error) {
-            console.error('Error checking payment status:', error.response?.data || error.message);
-            throw error;
+            console.error('[Duitku] Status check error:', {
+                merchantOrderId,
+                error: error.message,
+                response: error.response?.data
+            });
+            throw new DuitkuPaymentError('Failed to check transaction status', error);
         }
-    }
-
-    verifyCallback(callbackData) {
-        const signature = this.generateSignature({
-            merchantOrderId: callbackData.merchantOrderId,
-            amount: callbackData.amount
-        }, 'md5');
-
-        return signature === callbackData.signature;
     }
 }
 
-module.exports = new PaymentService();
+class DuitkuPaymentError extends Error {
+    constructor(message, originalError = null) {
+        super(message);
+        this.name = 'DuitkuPaymentError';
+        this.originalError = originalError;
+    }
+}
+
+module.exports = new DuitkuPaymentService();
