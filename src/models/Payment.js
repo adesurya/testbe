@@ -6,37 +6,67 @@ class Payment {
     static async create(paymentData) {
         const connection = await pool.getConnection();
         try {
-            await connection.beginTransaction();
+            // Debug log
+            console.log('Debug - Payment.create input:', {
+                user_id: paymentData.user_id,
+                merchant_order_id: paymentData.merchant_order_id,
+                payment_method: paymentData.payment_method
+            });
+
+            // Ensure all required fields are present
+            if (!paymentData.user_id) {
+                throw new Error('user_id is required');
+            }
+
+            // Convert user_id to integer if it's not already
+            const userId = parseInt(paymentData.user_id);
+            if (isNaN(userId)) {
+                throw new Error('Invalid user_id format');
+            }
+
+            // Prepare insert data with explicit type conversion
+            const insertData = {
+                user_id: userId,
+                plan_id: parseInt(paymentData.plan_id),
+                merchant_code: String(paymentData.merchant_code),
+                merchant_order_id: String(paymentData.merchant_order_id),
+                amount: Number(paymentData.amount),
+                payment_method: String(paymentData.payment_method),
+                status: paymentData.status || 'pending',
+                expiry_time: paymentData.expiry_time
+            };
+
+            // Debug log processed data
+            console.log('Debug - Processed payment data:', insertData);
 
             const [result] = await connection.query(
-                `INSERT INTO payments (
-                    user_id, plan_id, merchant_order_id, reference,
-                    amount, payment_method, payment_url, status,
-                    expiry_time, payment_details
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [
-                    paymentData.userId,
-                    paymentData.planId,
-                    paymentData.merchantOrderId,
-                    paymentData.reference,
-                    paymentData.amount,
-                    paymentData.paymentMethod,
-                    paymentData.paymentUrl,
-                    'pending',
-                    paymentData.expiryTime,
-                    JSON.stringify(paymentData.paymentDetails || {})
-                ]
+                `INSERT INTO payments SET ?`,
+                [insertData]
             );
 
-            await connection.commit();
-            return result.insertId;
+            if (!result.insertId) {
+                throw new Error('Failed to insert payment record');
+            }
+
+            // Fetch and return the created record
+            const [payments] = await connection.query(
+                'SELECT * FROM payments WHERE id = ?',
+                [result.insertId]
+            );
+
+            return payments[0];
+
         } catch (error) {
-            await connection.rollback();
+            console.error('Debug - Payment.create error:', {
+                error: error.message,
+                input: paymentData
+            });
             throw error;
         } finally {
             connection.release();
         }
     }
+
 
     static async findByMerchantOrderId(merchantOrderId) {
         const connection = await pool.getConnection();
@@ -253,6 +283,66 @@ class Payment {
             connection.release();
         }
     }
+
+    static async updateByMerchantOrderId(merchantOrderId, updateData) {
+        const connection = await pool.getConnection();
+        try {
+            console.log('[Payment] Updating payment record:', {
+                merchantOrderId,
+                status: updateData.status,
+                statusCode: updateData.status_code
+            });
+    
+            const [result] = await connection.query(
+                `UPDATE payments 
+                 SET 
+                    status = ?,
+                    status_code = ?,
+                    reference = ?,
+                    payment_details = ?,
+                    paid_time = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                 WHERE merchant_order_id = ?`,
+                [
+                    updateData.status,
+                    updateData.status_code,
+                    updateData.reference,
+                    updateData.payment_details,
+                    updateData.paid_time,
+                    merchantOrderId
+                ]
+            );
+    
+            if (result.affectedRows === 0) {
+                throw new Error(`Payment record not found: ${merchantOrderId}`);
+            }
+    
+            // Get updated record
+            const [payments] = await connection.query(
+                'SELECT * FROM payments WHERE merchant_order_id = ?',
+                [merchantOrderId]
+            );
+    
+            return payments[0];
+        } finally {
+            connection.release();
+        }
+    }
+    
+    static async findByMerchantOrderId(merchantOrderId) {
+        const connection = await pool.getConnection();
+        try {
+            const [payments] = await connection.query(
+                'SELECT * FROM payments WHERE merchant_order_id = ?',
+                [merchantOrderId]
+            );
+    
+            return payments[0];
+        } finally {
+            connection.release();
+        }
+    }
+    
 }
 
 module.exports = Payment;

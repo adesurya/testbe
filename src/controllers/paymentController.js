@@ -1,408 +1,249 @@
 // src/controllers/paymentController.js
+
 const PaymentService = require('../services/paymentService');
 const Payment = require('../models/Payment');
 const Plan = require('../models/Plan');
+const moment = require('moment');
+const { PaymentMethodHelper } = require('../config/paymentMethods');
 
 class PaymentController {
-    async getPaymentMethods(req, res) {
-        try {
-            const { planId } = req.params;
-            const plan = await Plan.findById(planId);
-            
-            if (!plan) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Plan not found'
-                });
-            }
-
-            const paymentMethods = await PaymentService.getPaymentMethods(plan.price);
-
-            res.json({
-                success: true,
-                data: paymentMethods
-            });
-        } catch (error) {
-            console.error('Error getting payment methods:', error);
-            res.status(500).json({
-                success: false,
-                error: error.message
-            });
-        }
-    }
-
     async createTransaction(req, res) {
-        const logContext = {
-            endpoint: 'createTransaction',
-            requestId: Date.now().toString()
-        };
-        
-        console.log('[Payment] Starting transaction creation:', logContext);
-        
         try {
             const { planId, paymentMethod } = req.body;
             const user = req.user;
 
-            // Validate required fields
-            if (!planId || !paymentMethod) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'planId and paymentMethod are required'
-                });
+            // Validate user
+            if (!user || !user.id) {
+                throw new Error('User not authenticated');
             }
 
-            console.log('[Payment] Fetching plan details:', { planId });
+            // Validate plan
             const plan = await Plan.findById(planId);
             if (!plan) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Plan not found'
-                });
+                throw new Error('Plan not found');
             }
 
+            // Create merchant order ID
+            const merchantOrderId = `ORDER${moment().format('YYMMDDHHmmss')}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
+
+            // Prepare transaction data
             const transactionData = {
-                amount: plan.price,
-                paymentMethod,
-                productDetails: `Payment for ${plan.name} Plan`,
-                customerName: user.username,
+                merchantCode: process.env.DUITKU_MERCHANT_CODE,
+                merchantOrderId: merchantOrderId,
+                paymentAmount: Math.round(plan.price),
+                paymentMethod: paymentMethod,
+                productDetails: `Payment for ${plan.name}`,
                 email: user.email,
                 phoneNumber: user.phone || '',
-                items: [{
-                    name: plan.name,
-                    price: plan.price,
-                    quantity: 1
-                }]
+                customerVaName: user.username,
+                callbackUrl: process.env.DUITKU_CALLBACK_URL,
+                returnUrl: process.env.DUITKU_RETURN_URL,
+                expiryPeriod: 10
             };
 
-            console.log('[Payment] Creating Duitku transaction:', { 
-                ...logContext,
-                transactionData: {
-                    ...transactionData,
-                    email: '***@***.com' // Mask sensitive data in logs
-                }
-            });
+            // Call Duitku API
+            const response = await PaymentService.createTransaction(transactionData);
 
-            const transaction = await PaymentService.createTransaction(transactionData);
-
-            console.log('[Payment] Transaction created successfully:', {
-                ...logContext,
-                merchantOrderId: transaction.merchantOrderId,
-                reference: transaction.reference
-            });
-
-            // Save payment record to database
-            await Payment.create({
-                userId: user.id,
-                planId: planId,
-                merchantOrderId: transaction.merchantOrderId,
-                reference: transaction.reference,
-                amount: plan.price,
-                paymentMethod: paymentMethod,
-                paymentUrl: transaction.paymentUrl,
+            // Save payment record
+            const paymentData = {
+                user_id: user.id,
+                plan_id: planId,
+                merchant_code: process.env.DUITKU_MERCHANT_CODE,
+                merchant_order_id: merchantOrderId,
+                reference: response.reference,
+                amount: Math.round(plan.price),
+                payment_method: paymentMethod,
+                payment_url: response.paymentUrl,
+                va_number: response.vaNumber || null,
+                qr_string: response.qrString || null,
                 status: 'pending',
-                expiryTime: new Date(Date.now() + 60 * 60 * 1000) // 1 hour expiry
+                status_code: response.statusCode,
+                status_message: response.statusMessage,
+                expiry_time: moment().add(10, 'minutes').toDate(),
+                payment_details: JSON.stringify({
+                    productDetails: `Payment for ${plan.name}`,
+                    customerEmail: user.email,
+                    customerName: user.username,
+                    originalResponse: response
+                })
+            };
+
+            await Payment.create(paymentData);
+
+            // Return response in exact format required by Duitku
+            res.json({
+                merchantCode: process.env.DUITKU_MERCHANT_CODE,
+                reference: response.reference,
+                paymentUrl: response.paymentUrl,
+                vaNumber: response.vaNumber || "",
+                qrString: response.qrString || "",
+                amount: String(Math.round(plan.price)), // Convert to string as per sample
+                statusCode: response.statusCode || "00",
+                statusMessage: response.statusMessage || "SUCCESS"
             });
 
-            res.json({
-                success: true,
-                data: {
-                    merchantOrderId: transaction.merchantOrderId,
-                    reference: transaction.reference,
-                    paymentUrl: transaction.paymentUrl,
-                    expiryTime: transaction.expiredDate || null
-                }
-            });
         } catch (error) {
-            console.error('[Payment] Error creating transaction:', {
-                ...logContext,
+            console.error('[Payment] Error:', error);
+            res.status(500).json({
                 error: error.message,
-                stack: error.stack,
-                originalError: error.originalError || {},
-                requestBody: req.body
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to create transaction',
-                details: error.message,
-                code: error.response?.status || 500,
-                requestId: logContext.requestId
-            });
-        }
-    }
-
-    async getPaymentStatus(req, res) {
-        try {
-            const { merchantOrderId } = req.params;
-            
-            const payment = await Payment.findByMerchantOrderId(merchantOrderId);
-            if (!payment) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Payment not found'
-                });
-            }
-
-            // Verify user authorization
-            if (payment.userId !== req.user.id && req.user.role !== 'admin') {
-                return res.status(403).json({
-                    success: false,
-                    error: 'Unauthorized access'
-                });
-            }
-
-            // Get real-time status from Duitku
-            const duitkuStatus = await PaymentService.checkTransactionStatus(merchantOrderId);
-
-            // Update local status if needed
-            if (duitkuStatus.statusCode === '00' && payment.status !== 'paid') {
-                await Payment.updateStatus(merchantOrderId, 'paid');
-                await Plan.assignToUser(payment.userId, payment.planId);
-            }
-
-            res.json({
-                success: true,
-                data: {
-                    merchantOrderId: payment.merchantOrderId,
-                    reference: payment.reference,
-                    amount: payment.amount,
-                    status: payment.status,
-                    paymentMethod: payment.paymentMethod,
-                    createdAt: payment.createdAt,
-                    expiryTime: payment.expiryTime,
-                    duitkuStatus: duitkuStatus
-                }
-            });
-        } catch (error) {
-            console.error('Error getting payment status:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to get payment status',
-                details: error.message
+                statusCode: "01",
+                statusMessage: "FAILED"
             });
         }
     }
 
     async handleCallback(req, res) {
-        const logContext = {
-            endpoint: 'handleCallback',
-            requestId: Date.now().toString()
-        };
-
+        console.log('[Payment Callback] Received callback data:', {
+            ...req.body,
+            signature: '***'  // Mask signature in logs
+        });
+    
         try {
-            const callbackData = req.body;
-            console.log('[Payment] Received callback:', {
-                ...logContext,
-                callbackData: {
-                    ...callbackData,
-                    signature: '***' // Mask sensitive data
-                }
-            });
-
-            // Verify callback authenticity
-            const isValid = PaymentService.verifyCallback(callbackData);
-            if (!isValid) {
-                console.warn('[Payment] Invalid callback signature:', {
-                    ...logContext,
-                    merchantOrderId: callbackData.merchantOrderId
-                });
-                return res.status(400).send('Invalid callback signature');
+            const {
+                merchantCode,
+                amount,
+                merchantOrderId,
+                productDetail,
+                additionalParam,
+                paymentCode,
+                resultCode,
+                merchantUserId,
+                reference,
+                signature,
+                publisherOrderId,
+                spUserHash,
+                settlementDate,
+                issuerCode
+            } = req.body;
+    
+            // Validate required fields
+            if (!merchantCode || !merchantOrderId || !amount || !signature) {
+                throw new Error('Missing required callback parameters');
             }
-
-            const payment = await Payment.findByMerchantOrderId(callbackData.merchantOrderId);
+    
+            // Validate merchant code
+            if (merchantCode !== process.env.DUITKU_MERCHANT_CODE) {
+                throw new Error('Invalid merchant code');
+            }
+    
+            // Verify signature
+            const expectedSignature = crypto
+                .createHash('md5')
+                .update(`${merchantCode}${amount}${merchantOrderId}${process.env.DUITKU_API_KEY}`)
+                .digest('hex');
+    
+            if (signature !== expectedSignature) {
+                throw new Error('Invalid signature');
+            }
+    
+            // Get payment record
+            const payment = await Payment.findByMerchantOrderId(merchantOrderId);
             if (!payment) {
-                console.warn('[Payment] Payment not found:', {
-                    ...logContext,
-                    merchantOrderId: callbackData.merchantOrderId
-                });
-                return res.status(404).send('Payment not found');
+                throw new Error(`Payment record not found for order ${merchantOrderId}`);
             }
-
-            // Process payment status
-            switch (callbackData.resultCode) {
-                case '00':
-                    console.log('[Payment] Processing successful payment:', {
-                        ...logContext,
-                        merchantOrderId: callbackData.merchantOrderId
-                    });
-                    await Payment.updateStatus(payment.merchantOrderId, 'paid', callbackData);
-                    await Plan.assignToUser(payment.userId, payment.planId);
-                    break;
-                    
-                case '01':
-                    console.log('[Payment] Processing failed payment:', {
-                        ...logContext,
-                        merchantOrderId: callbackData.merchantOrderId
-                    });
-                    await Payment.updateStatus(payment.merchantOrderId, 'failed', callbackData);
-                    break;
-                    
-                default:
-                    console.warn('[Payment] Unhandled payment result code:', {
-                        ...logContext,
-                        merchantOrderId: callbackData.merchantOrderId,
-                        resultCode: callbackData.resultCode
-                    });
-                    await Payment.updateStatus(payment.merchantOrderId, 'failed', callbackData);
+    
+            // Update payment status
+            const status = resultCode === '00' ? 'paid' : 'failed';
+            const updateData = {
+                status,
+                status_code: resultCode,
+                reference: reference,
+                payment_details: JSON.stringify({
+                    productDetail,
+                    additionalParam,
+                    paymentCode,
+                    merchantUserId,
+                    publisherOrderId,
+                    spUserHash,
+                    settlementDate,
+                    issuerCode,
+                    lastUpdate: new Date().toISOString()
+                }),
+                paid_time: resultCode === '00' ? new Date() : null
+            };
+    
+            await Payment.updateByMerchantOrderId(merchantOrderId, updateData);
+    
+            // If payment is successful, activate the plan
+            if (resultCode === '00') {
+                await this.activateUserPlan(payment.user_id, payment.plan_id);
             }
-
-            res.send('OK');
+    
+            // Return success response to Duitku
+            res.status(200).send('OK');
+    
         } catch (error) {
-            console.error('[Payment] Error handling callback:', {
-                ...logContext,
-                error: error.message,
+            console.error('[Payment Callback] Error:', {
+                message: error.message,
                 stack: error.stack
             });
-            res.status(500).send('Error processing callback');
+    
+            // Still return OK to avoid duplicate callbacks
+            res.status(200).send('OK');
         }
     }
-
-    async handleReturn(req, res) {
-        const { merchantOrderId, resultCode } = req.query;
-        const baseUrl = process.env.FRONTEND_URL;
-        
-        console.log('[Payment] Processing return URL:', {
-            merchantOrderId,
-            resultCode
-        });
-
+    
+    // Helper method untuk aktivasi plan
+    async activateUserPlan(userId, planId) {
         try {
-            const payment = await Payment.findByMerchantOrderId(merchantOrderId);
-            if (!payment) {
-                console.warn('[Payment] Payment not found for return URL:', { merchantOrderId });
-                return res.redirect(`${baseUrl}/payment/failed?orderId=${merchantOrderId}`);
+            const plan = await Plan.findById(planId);
+            if (!plan) {
+                throw new Error('Plan not found');
             }
-
-            const duitkuStatus = await PaymentService.checkTransactionStatus(merchantOrderId);
-            
-            if (duitkuStatus.statusCode === '00') {
-                console.log('[Payment] Redirecting to success page:', { merchantOrderId });
-                return res.redirect(`${baseUrl}/payment/success?orderId=${merchantOrderId}`);
-            } else {
-                console.log('[Payment] Redirecting to failed page:', { merchantOrderId });
-                return res.redirect(`${baseUrl}/payment/failed?orderId=${merchantOrderId}`);
-            }
-        } catch (error) {
-            console.error('[Payment] Error handling return URL:', {
-                merchantOrderId,
-                error: error.message
-            });
-            return res.redirect(`${baseUrl}/payment/failed?orderId=${merchantOrderId}`);
-        }
-    }
-
-    async getPaymentHistory(req, res) {
-        try {
-            const { page = 1, limit = 10, status } = req.query;
-            const userId = req.user.id;
-
-            const payments = await Payment.getUserPaymentHistory(userId, {
-                page: parseInt(page),
-                limit: parseInt(limit),
-                status
-            });
-
-            res.json({
-                success: true,
-                data: payments.data,
-                pagination: payments.pagination
-            });
-        } catch (error) {
-            console.error('Error getting payment history:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to get payment history'
-            });
-        }
-    }
-
-    // Admin Methods
-
-    async getAllPayments(req, res) {
-        try {
-            const { 
-                page = 1, 
-                limit = 10, 
-                status, 
-                startDate, 
-                endDate 
-            } = req.query;
-
-            const filters = {
-                status,
-                startDate,
-                endDate,
-                page: parseInt(page),
-                limit: parseInt(limit)
-            };
-
-            const payments = await Payment.getAllPayments(filters);
-
-            res.json({
-                success: true,
-                data: payments.data,
-                pagination: payments.pagination
-            });
-        } catch (error) {
-            console.error('Error getting all payments:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to get payments'
-            });
-        }
-    }
-
-    async getPaymentStatistics(req, res) {
-        try {
-            const { startDate, endDate } = req.query;
-            const stats = await Payment.getPaymentStatistics({ startDate, endDate });
-
-            res.json({
-                success: true,
-                data: stats
-            });
-        } catch (error) {
-            console.error('Error getting payment statistics:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to get statistics'
-            });
-        }
-    }
-
-    async retryCallback(req, res) {
-        try {
-            const { merchantOrderId } = req.params;
-            
-            const payment = await Payment.findByMerchantOrderId(merchantOrderId);
-            if (!payment) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Payment not found'
-                });
-            }
-
-            const status = await PaymentService.checkTransactionStatus(merchantOrderId);
-            
-            if (status.statusCode === '00') {
-                await Payment.updateStatus(merchantOrderId, 'paid', status);
-                await Plan.assignToUser(payment.userId, payment.planId);
-            }
-
-            res.json({
-                success: true,
-                message: 'Callback retry processed successfully',
-                data: {
-                    status: status,
-                    payment: await Payment.findByMerchantOrderId(merchantOrderId)
+    
+            // Start a database transaction
+            const connection = await pool.getConnection();
+            try {
+                await connection.beginTransaction();
+    
+                // Create plan transaction record
+                await connection.query(
+                    `INSERT INTO plan_transactions 
+                    (user_id, plan_id, transaction_type, amount, payment_method, payment_status, messages_added)
+                    VALUES (?, ?, 'purchase', ?, 'online', 'completed', ?)`,
+                    [userId, planId, plan.price, plan.message_limit]
+                );
+    
+                // Create or update user plan
+                const [existingPlan] = await connection.query(
+                    'SELECT * FROM user_plans WHERE user_id = ? AND status = "active"',
+                    [userId]
+                );
+    
+                if (existingPlan.length > 0) {
+                    // Update existing plan
+                    await connection.query(
+                        `UPDATE user_plans 
+                         SET messages_remaining = messages_remaining + ?,
+                             end_date = DATE_ADD(GREATEST(end_date, NOW()), INTERVAL ? DAY)
+                         WHERE id = ?`,
+                        [plan.message_limit, plan.duration_days, existingPlan[0].id]
+                    );
+                } else {
+                    // Create new plan
+                    const endDate = new Date();
+                    endDate.setDate(endDate.getDate() + plan.duration_days);
+    
+                    await connection.query(
+                        `INSERT INTO user_plans 
+                        (user_id, plan_id, messages_remaining, end_date, status)
+                        VALUES (?, ?, ?, ?, 'active')`,
+                        [userId, planId, plan.message_limit, endDate]
+                    );
                 }
-            });
+    
+                await connection.commit();
+    
+            } catch (error) {
+                await connection.rollback();
+                throw error;
+            } finally {
+                connection.release();
+            }
+    
         } catch (error) {
-            console.error('Error retrying callback:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retry callback'
-            });
+            console.error('[Payment] Error activating plan:', error);
+            throw error;
         }
     }
 }

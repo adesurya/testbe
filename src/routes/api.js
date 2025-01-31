@@ -1914,50 +1914,11 @@ router.get('/reports/transactions/summary', auth, isAdmin, reportController.getT
 
 /**
  * @swagger
- * /api/payments/methods/{planId}:
- *   get:
- *     tags:
- *       - Payments
- *     summary: Get available payment methods for a plan
- *     description: Returns list of available payment methods with fees from Duitku
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: planId
- *         required: true
- *         schema:
- *           type: integer
- *         description: ID of the plan
- *     responses:
- *       200:
- *         description: List of payment methods
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/PaymentMethod'
- *       404:
- *         description: Plan not found
- *       500:
- *         description: Server error
- */
-router.get('/payments/methods/:planId', auth, paymentController.getPaymentMethods);
-
-/**
- * @swagger
  * /api/payments/create:
  *   post:
  *     tags:
  *       - Payments
  *     summary: Create a new payment transaction
- *     description: Initiates a payment transaction with Duitku
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -1972,8 +1933,11 @@ router.get('/payments/methods/:planId', auth, paymentController.getPaymentMethod
  *             properties:
  *               planId:
  *                 type: integer
+ *                 description: ID of the plan being purchased
  *               paymentMethod:
  *                 type: string
+ *                 enum: [BC, M2, VA, B1, BT, OV, DA, SP]
+ *                 description: Payment method code
  *     responses:
  *       200:
  *         description: Payment transaction created successfully
@@ -1985,7 +1949,32 @@ router.get('/payments/methods/:planId', auth, paymentController.getPaymentMethod
  *                 success:
  *                   type: boolean
  *                 data:
- *                   $ref: '#/components/schemas/PaymentTransaction'
+ *                   type: object
+ *                   properties:
+ *                     merchantOrderId:
+ *                       type: string
+ *                     reference:
+ *                       type: string
+ *                     paymentUrl:
+ *                       type: string
+ *                     vaNumber:
+ *                       type: string
+ *                     qrString:
+ *                       type: string
+ *                     amount:
+ *                       type: number
+ *                     expiryTime:
+ *                       type: string
+ *                       format: date-time
+ *                     method:
+ *                       type: object
+ *                       properties:
+ *                         code:
+ *                           type: string
+ *                         name:
+ *                           type: string
+ *                         type:
+ *                           type: string
  *       400:
  *         description: Invalid request parameters
  *       404:
@@ -1997,94 +1986,12 @@ router.post('/payments/create', auth, paymentController.createTransaction);
 
 /**
  * @swagger
- * /api/payments/status/{merchantOrderId}:
- *   get:
- *     tags:
- *       - Payments
- *     summary: Get payment transaction status
- *     description: Get detailed status of a payment transaction
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: merchantOrderId
- *         required: true
- *         schema:
- *           type: string
- *         description: Merchant order ID of the transaction
- *     responses:
- *       200:
- *         description: Payment status details
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   $ref: '#/components/schemas/PaymentTransaction'
- *       403:
- *         description: Unauthorized access
- *       404:
- *         description: Transaction not found
- */
-router.get('/payments/status/:merchantOrderId', auth, paymentController.getPaymentStatus);
-
-/**
- * @swagger
- * /api/payments/history:
- *   get:
- *     tags:
- *       - Payments
- *     summary: Get user's payment history
- *     description: Returns list of user's payment transactions
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *         description: Page number for pagination
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *         description: Number of items per page
- *       - in: query
- *         name: status
- *         schema:
- *           type: string
- *           enum: [pending, paid, failed, expired]
- *         description: Filter by payment status
- *     responses:
- *       200:
- *         description: Payment history retrieved successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/PaymentTransaction'
- *                 pagination:
- *                   $ref: '#/components/schemas/Pagination'
- */
-router.get('/payments/history', auth, paymentController.getPaymentHistory);
-
-/**
- * @swagger
  * /api/payments/callback:
  *   post:
  *     tags:
  *       - Payments
- *     summary: Handle payment gateway callback
- *     description: Endpoint for Duitku to send payment notifications
+ *     summary: Payment callback endpoint for Duitku
+ *     description: Endpoint to receive payment notifications from Duitku
  *     requestBody:
  *       required: true
  *       content:
@@ -2095,267 +2002,63 @@ router.get('/payments/history', auth, paymentController.getPaymentHistory);
  *               - merchantCode
  *               - amount
  *               - merchantOrderId
- *               - reference
  *               - signature
  *             properties:
  *               merchantCode:
  *                 type: string
+ *                 description: Merchant code from Duitku
  *               amount:
  *                 type: string
+ *                 description: Transaction amount
  *               merchantOrderId:
  *                 type: string
+ *                 description: Original order ID from merchant
  *               productDetail:
  *                 type: string
+ *                 description: Product details
  *               additionalParam:
  *                 type: string
- *               paymentMethod:
+ *                 description: Additional parameters
+ *               paymentCode:
  *                 type: string
+ *                 description: Payment method code
  *               resultCode:
  *                 type: string
+ *                 description: Transaction result (00=Success, 01=Failed)
  *               merchantUserId:
  *                 type: string
+ *                 description: Customer username or email
  *               reference:
  *                 type: string
+ *                 description: Transaction reference from Duitku
  *               signature:
  *                 type: string
+ *                 description: Security signature
+ *               publisherOrderId:
+ *                 type: string
+ *                 description: Unique payment ID from Duitku
+ *               spUserHash:
+ *                 type: string
+ *                 description: ShopeePay user hash (if applicable)
+ *               settlementDate:
+ *                 type: string
+ *                 format: date
+ *                 description: Estimated settlement date (YYYY-MM-DD)
+ *               issuerCode:
+ *                 type: string
+ *                 description: QRIS issuer code
  *     responses:
  *       200:
  *         description: Callback processed successfully
- *       400:
- *         description: Invalid callback data
+ *         content:
+ *           text/plain:
+ *             schema:
+ *               type: string
+ *               example: OK
+ *       500:
+ *         description: Internal server error
  */
 router.post('/payments/callback', paymentController.handleCallback);
-
-/**
- * @swagger
- * /api/payments/return:
- *   get:
- *     tags:
- *       - Payments
- *     summary: Handle payment return URL
- *     description: Endpoint for user redirect after payment process
- *     parameters:
- *       - in: query
- *         name: merchantOrderId
- *         required: true
- *         schema:
- *           type: string
- *       - in: query
- *         name: resultCode
- *         schema:
- *           type: string
- *       - in: query
- *         name: reference
- *         schema:
- *           type: string
- *     responses:
- *       302:
- *         description: Redirect to success/failure page
- */
-router.get('/payments/return', paymentController.handleReturn);
-
-// Admin Routes
-/**
- * @swagger
- * /api/admin/payments:
- *   get:
- *     tags:
- *       - Admin
- *       - Payments
- *     summary: Get all payment transactions (Admin only)
- *     description: Returns list of all payment transactions with filters
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *       - in: query
- *         name: status
- *         schema:
- *           type: string
- *       - in: query
- *         name: startDate
- *         schema:
- *           type: string
- *           format: date
- *       - in: query
- *         name: endDate
- *         schema:
- *           type: string
- *           format: date
- *     responses:
- *       200:
- *         description: List of payment transactions
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/PaymentTransaction'
- *                 pagination:
- *                   $ref: '#/components/schemas/Pagination'
- */
-router.get('/admin/payments', auth, isAdmin, paymentController.getAllPayments);
-
-/**
- * @swagger
- * /api/admin/payments/statistics:
- *   get:
- *     tags:
- *       - Admin
- *       - Payments
- *     summary: Get payment statistics (Admin only)
- *     description: Returns payment statistics and analytics data
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: startDate
- *         schema:
- *           type: string
- *           format: date
- *       - in: query
- *         name: endDate
- *         schema:
- *           type: string
- *           format: date
- *     responses:
- *       200:
- *         description: Payment statistics retrieved successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   $ref: '#/components/schemas/PaymentStatistics'
- */
-router.get('/admin/payments/statistics', auth, isAdmin, paymentController.getPaymentStatistics);
-
-/**
- * @swagger
- * /api/admin/payments/{merchantOrderId}/retry-callback:
- *   post:
- *     tags:
- *       - Admin
- *       - Payments
- *     summary: Manually retry payment callback (Admin only)
- *     description: Manually retry processing a payment callback
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: merchantOrderId
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Callback retry processed successfully
- *       404:
- *         description: Transaction not found
- */
-router.post('/admin/payments/:merchantOrderId/retry-callback', auth, isAdmin, paymentController.retryCallback);
-
-/**
- * @swagger
- * components:
- *   schemas:
- *     PaymentMethod:
- *       type: object
- *       properties:
- *         paymentMethod:
- *           type: string
- *         paymentName:
- *           type: string
- *         paymentImage:
- *           type: string
- *         totalFee:
- *           type: number
- *         type:
- *           type: string
- * 
- *     PaymentTransaction:
- *       type: object
- *       properties:
- *         id:
- *           type: integer
- *         userId:
- *           type: integer
- *         planId:
- *           type: integer
- *         merchantOrderId:
- *           type: string
- *         reference:
- *           type: string
- *         amount:
- *           type: number
- *         paymentMethod:
- *           type: string
- *         paymentUrl:
- *           type: string
- *         status:
- *           type: string
- *           enum: [pending, paid, expired, failed]
- *         paymentDetails:
- *           type: object
- *         createdAt:
- *           type: string
- *           format: date-time
- *         updatedAt:
- *           type: string
- *           format: date-time
- * 
- *     PaymentStatistics:
- *       type: object
- *       properties:
- *         totalTransactions:
- *           type: integer
- *         successfulPayments:
- *           type: integer
- *         failedPayments:
- *           type: integer
- *         totalRevenue:
- *           type: number
- *         averageTransactionValue:
- *           type: number
- *         paymentMethodBreakdown:
- *           type: array
- *           items:
- *             type: object
- *             properties:
- *               method:
- *                 type: string
- *               count:
- *                 type: integer
- *               amount:
- *                 type: number
- *
- *     Pagination:
- *       type: object
- *       properties:
- *         total:
- *           type: integer
- *         perPage:
- *           type: integer
- *         currentPage:
- *           type: integer
- *         lastPage:
- *           type: integer
- */
 
 // Route implementation
 router.post('/messages/bulk/send', auth, messageController.sendBulkMessages);
