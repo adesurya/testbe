@@ -354,6 +354,78 @@ class Plan {
             connection.release();
         }
     }
+
+    static async getUserPlans(userId) {
+        const connection = await pool.getConnection();
+        try {
+            const [plans] = await connection.query(
+                `SELECT 
+                    up.*,
+                    p.name as plan_name,
+                    p.price,
+                    p.message_limit,
+                    p.duration_days
+                FROM user_plans up
+                JOIN plans p ON up.plan_id = p.id
+                WHERE up.user_id = ?
+                ORDER BY up.created_at DESC`,
+                [userId]
+            );
+
+            return {
+                success: true,
+                data: plans.map(plan => ({
+                    id: plan.id,
+                    planName: plan.plan_name,
+                    messagesRemaining: plan.messages_remaining,
+                    startDate: plan.start_date,
+                    endDate: plan.end_date,
+                    status: plan.status,
+                    price: plan.price,
+                    messageLimit: plan.message_limit,
+                    durationDays: plan.duration_days
+                }))
+            };
+        } finally {
+            connection.release();
+        }
+    }
+
+    static async getAllPlans() {
+        const connection = await pool.getConnection();
+        try {
+            const [plans] = await connection.query(
+                `SELECT 
+                    p.*,
+                    COUNT(up.id) as active_users,
+                    SUM(CASE WHEN up.status = 'active' THEN 1 ELSE 0 END) as current_active_users
+                FROM plans p
+                LEFT JOIN user_plans up ON p.id = up.plan_id
+                WHERE p.status = 'active'
+                GROUP BY p.id
+                ORDER BY p.price ASC`
+            );
+
+            return {
+                success: true,
+                data: plans.map(plan => ({
+                    id: plan.id,
+                    name: plan.name,
+                    messageLimit: plan.message_limit,
+                    price: plan.price,
+                    durationDays: plan.duration_days,
+                    description: plan.description,
+                    features: plan.features ? JSON.parse(plan.features) : [],
+                    activeUsers: plan.active_users,
+                    currentActiveUsers: plan.current_active_users
+                }))
+            };
+        } finally {
+            connection.release();
+        }
+    }
+
+
 }
 
 module.exports = Plan;

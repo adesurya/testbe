@@ -155,6 +155,19 @@ class PlanController {
             res.status(500).json({ error: error.message });
         }
     }
+
+    async getAllPlans(req, res) {
+        try {
+            const plans = await Plan.getAllPlans();
+            res.json(plans);
+        } catch (error) {
+            console.error('Error getting all plans:', error);
+            res.status(500).json({ 
+                success: false,
+                error: error.message 
+            });
+        }
+    }
 }
 
 module.exports = new PlanController();

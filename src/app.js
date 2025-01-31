@@ -1,11 +1,13 @@
 // src/app.js
 const express = require('express');
 const cors = require('cors');
-const swaggerUi = require('swagger-ui-express');
-const swaggerSpec = require('./config/swagger');
+const swaggerUI = require('swagger-ui-express');
+const swaggerJsDoc = require('swagger-jsdoc');
 const apiRoutes = require('./routes/api');
 const WhatsappService = require('./services/whatsappService');
 const CleanupService = require('./services/cleanupService');
+const { swaggerSpec, getSwaggerJson } = require('./config/swagger');
+const path = require('path');
 
 require('dotenv').config();
 
@@ -31,17 +33,32 @@ app.use(express.json({
 // API Routes
 app.use('/api', apiRoutes);
 
-// Swagger documentation
 const swaggerOptions = {
-    explorer: true,
-    swaggerOptions: {
-        persistAuthorization: true
+    definition: {
+        openapi: '3.0.0',
+        info: {
+            title: 'WhatsApp Marketing API',
+            version: '1.0.0',
+            description: 'API Documentation'
+        },
+        servers: [
+            {
+                url: 'http://localhost:8000',
+                description: 'Development server'
+            }
+        ]
     },
-    customCss: '.swagger-ui .topbar { display: none }'
+    apis: [path.join(__dirname, './routes/*.js')]
 };
 
-app.use('/api-docs', swaggerUi.serve);
-app.get('/api-docs', swaggerUi.setup(swaggerSpec, swaggerOptions));
+const swaggerDocs = swaggerJsDoc(swaggerOptions);
+
+app.use('/api-docs', swaggerUI.serve);
+app.get('/api-docs', swaggerUI.setup(swaggerDocs));
+app.get('/api-docs/swagger.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(swaggerDocs);
+});
 
 // Error handling
 app.use((err, req, res, next) => {
@@ -54,8 +71,8 @@ app.use((err, req, res, next) => {
 });
 
 const server = app.listen(process.env.PORT || 3000, () => {
-    console.log(`Server running on port ${process.env.PORT || 3000}`);
-    console.log(`Swagger documentation available at http://localhost:${process.env.PORT || 3000}/api-docs`);
+    console.log(`Server running on port ${process.env.PORT || 8000}`);
+    console.log(`Swagger documentation available at http://localhost:${process.env.PORT || 8000}/api-docs`);
 });
 
 process.on('SIGTERM', gracefulShutdown);

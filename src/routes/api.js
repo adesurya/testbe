@@ -407,6 +407,51 @@ router.get('/messages/history/:userId', auth, messageController.getUserMessages)
 /**
  * @swagger
  * /api/plans:
+ *   get:
+ *     tags: [Plans]
+ *     summary: Get all available plans
+ *     description: Retrieve all active plans with their details and statistics
+ *     responses:
+ *       200:
+ *         description: List of all plans
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                       name:
+ *                         type: string
+ *                       messageLimit:
+ *                         type: integer
+ *                       price:
+ *                         type: number
+ *                       durationDays:
+ *                         type: integer
+ *                       description:
+ *                         type: string
+ *                       features:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                       activeUsers:
+ *                         type: integer
+ *                       currentActiveUsers:
+ *                         type: integer
+ */
+router.get('/plans', planController.getAllPlans);
+
+/**
+ * @swagger
+ * /api/plans:
  *   post:
  *     tags: [Plans]
  *     summary: Create new plan (Admin only)
@@ -795,124 +840,6 @@ router.get('/plans/transactions', auth, isAdmin, planController.getAllTransactio
  */
 router.get('/plans/transactions/:userId', auth, planController.getPlanTransactions);
 
-
-/**
- * @swagger
- * /api/payments/methods/{planId}:
- *   get:
- *     tags: [Payments]
- *     summary: Get available payment methods for a plan
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: planId
- *         required: true
- *         schema:
- *           type: integer
- */
-router.get('/payments/methods/:planId', auth, paymentController.getPaymentMethods);
-
-/**
- * @swagger
- * /api/payments/create:
- *   post:
- *     tags: [Payments]
- *     summary: Create payment request
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - planId
- *               - paymentMethod
- */
-router.post('/payments/create', auth, paymentController.createPayment);
-
-/**
- * @swagger
- * /api/payments/callback:
- *   post:
- *     tags: [Payments]
- *     summary: Payment gateway callback endpoint
- */
-router.post('/payments/callback', paymentController.handleCallback);
-
-/**
- * @swagger
- * /api/payments/return:
- *   get:
- *     tags: [Payments]
- *     summary: Payment return URL
- */
-router.get('/payments/return', paymentController.handleReturn);
-
-/**
- * @swagger
- * /api/payments/status/{merchantOrderId}:
- *   get:
- *     tags: [Payments]
- *     summary: Check payment status
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: merchantOrderId
- *         required: true
- *         schema:
- *           type: string
- */
-router.get('/payments/status/:merchantOrderId', auth, paymentController.checkStatus);
-
-/**
- * @swagger
- * /api/payments/history:
- *   get:
- *     tags: [Payments]
- *     summary: Get user payment history
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: List of user payments
- */
-
-/**
- * @swagger
- * /api/payments/history:
- *   get:
- *     tags: [Payments]
- *     summary: Get user payment history
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: List of user payments
- */
-router.get('/payments/history', auth, paymentController.getPaymentHistory);
-
-/**
- * @swagger
- * /api/payments/detail/{merchantOrderId}:
- *   get:
- *     tags: [Payments]
- *     summary: Get payment detail
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: merchantOrderId
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Payment detail retrieved successfully
- */
 
 /**
  * @swagger
@@ -1985,14 +1912,137 @@ router.delete('/admin/metrics/:id', auth, isAdmin, adminController.deleteMetric)
 router.get('/reports/transactions', auth, isAdmin, reportController.getTransactionReport);
 router.get('/reports/transactions/summary', auth, isAdmin, reportController.getTransactionSummary);
 
+/**
+ * @swagger
+ * /api/payments/methods/{planId}:
+ *   get:
+ *     tags: [Payments]
+ *     summary: Get available payment methods for a plan
+ *     parameters:
+ *       - in: path
+ *         name: planId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of payment methods
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     responseCode:
+ *                       type: string
+ *                     responseMessage:
+ *                       type: string
+ *                     paymentFee:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           paymentMethod:
+ *                             type: string
+ *                           paymentName:
+ *                             type: string
+ *                           totalFee:
+ *                             type: number
+ * 
+ * /api/payments/transaction:
+ *   post:
+ *     tags: [Payments]
+ *     summary: Create payment transaction
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - planId
+ *               - paymentMethod
+ *             properties:
+ *               planId:
+ *                 type: integer
+ *               paymentMethod:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Transaction created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     merchantOrderId:
+ *                       type: string
+ *                     reference:
+ *                       type: string
+ *                     paymentUrl:
+ *                       type: string
+ * 
+ * /api/payments/callback:
+ *   post:
+ *     tags: [Payments]
+ *     summary: Payment callback from Duitku
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/x-www-form-urlencoded:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - merchantCode
+ *               - amount
+ *               - merchantOrderId
+ *               - resultCode
+ *             properties:
+ *               merchantCode:
+ *                 type: string
+ *               amount:
+ *                 type: string
+ *               merchantOrderId:
+ *                 type: string
+ *               resultCode:
+ *                 type: string
+ *               reference:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: OK
+ * 
+ * /api/payments/return:
+ *   get:
+ *     tags: [Payments]
+ *     summary: Return URL after payment
+ *     parameters:
+ *       - in: query
+ *         name: merchantOrderId
+ *         schema:
+ *           type: string
+ *     responses:
+ *       302:
+ *         description: Redirect to frontend payment status page
+ */
+
 // Route implementation
 router.post('/messages/bulk/send', auth, messageController.sendBulkMessages);
 router.get('/messages/bulk/:bulkId/status', auth, messageController.getBulkStatus);
 router.get('/messages/bulk/history', auth, messageController.getBulkHistory);
 
-router.get('/payments/detail/:merchantOrderId', auth, paymentController.getPaymentDetail);
-router.get('/payments/return', paymentController.handleReturn);
-router.post('/payments/callback', paymentController.handleCallback);
-router.get('/payments/detail/:merchantOrderId', auth, paymentController.getPaymentDetail);
 
 module.exports = router;

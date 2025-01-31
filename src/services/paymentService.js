@@ -1,4 +1,5 @@
 // src/services/paymentService.js
+
 const axios = require('axios');
 const crypto = require('crypto');
 const moment = require('moment');
@@ -7,103 +8,131 @@ class PaymentService {
     constructor() {
         this.merchantCode = process.env.DUITKU_MERCHANT_CODE;
         this.apiKey = process.env.DUITKU_API_KEY;
-        this.apiUrl = process.env.DUITKU_API_URL;
+        this.baseUrl = process.env.DUITKU_BASE_URL || 'https://sandbox.duitku.com/webapi/api/merchant';
+        this.callbackUrl = process.env.FRONTEND_URL + '/api/payments/callback';
+        this.returnUrl = process.env.FRONTEND_URL + '/api/payments/return';
     }
 
-    generateSignature(params) {
-        const hash = crypto.createHash('sha256');
-        return hash.update(params).digest('hex');
+    generateSignature(merchantCode, amount, datetime, apiKey) {
+        const signatureText = merchantCode + amount + datetime + apiKey;
+        return crypto.createHash('sha256').update(signatureText).digest('hex');
     }
 
-    generateMD5Signature(params) {
-        const hash = crypto.createHash('md5');
-        return hash.update(params).digest('hex');
-    }
 
-    formatAmount(amount) {
-        // Convert to integer by removing decimal points and converting to string
-        return Math.round(amount).toString();
-    }
-
-    async getPaymentMethods(amount) {
+    async getPaymentMethods({ amount }) {
         try {
-            const formattedAmount = this.formatAmount(amount);
             const datetime = moment().format('YYYY-MM-DD HH:mm:ss');
-            const signature = this.generateSignature(
-                this.merchantCode + formattedAmount + datetime + this.apiKey
-            );
+            const signature = crypto.createHash('sha256')
+                .update(this.merchantCode + amount + datetime + this.apiKey)
+                .digest('hex');
 
-            console.log('Getting payment methods with amount:', formattedAmount);
-
-            const response = await axios.post(`${this.apiUrl}/paymentmethod/getpaymentmethod`, {
+            const payload = {
                 merchantCode: this.merchantCode,
-                amount: formattedAmount,
+                amount: amount,
                 datetime: datetime,
                 signature: signature
-            });
+            };
 
+            const response = await axios.post(`${this.baseUrl}/paymentmethod/getpaymentmethod`, payload);
             return response.data;
         } catch (error) {
-            console.error('Error getting payment methods:', error.response?.data || error.message);
+            console.error('Error getting payment methods:', error.response?.data || error);
+            throw error;
+        }
+    }
+
+    async createTransaction(data) {
+        try {
+            const merchantOrderId = moment().format('x'); // timestamp
+            const signature = crypto.createHash('md5')
+                .update(this.merchantCode + merchantOrderId + data.amount + this.apiKey)
+                .digest('hex');
+
+            const payload = {
+                merchantCode: this.merchantCode,
+                paymentAmount: data.amount,
+                paymentMethod: data.paymentMethod,
+                merchantOrderId: merchantOrderId,
+                productDetails: data.productDetails,
+                customerVaName: data.customerName,
+                email: data.email,
+                phoneNumber: data.phoneNumber,
+                callbackUrl: this.callbackUrl,
+                returnUrl: this.returnUrl,
+                signature: signature,
+                expiryPeriod: 60, // 1 hour expiry
+                customerDetail: {
+                    firstName: data.customerName,
+                    email: data.email,
+                    phoneNumber: data.phoneNumber,
+                    billingAddress: {
+                        firstName: data.customerName,
+                        phone: data.phoneNumber,
+                        countryCode: "ID"
+                    }
+                }
+            };
+
+            const response = await axios.post(`${this.baseUrl}/v2/inquiry`, payload);
+            return {
+                ...response.data,
+                merchantOrderId
+            };
+        } catch (error) {
+            console.error('Error creating transaction:', error.response?.data || error);
             throw error;
         }
     }
 
     async createPaymentRequest(paymentData) {
         try {
-            const formattedAmount = this.formatAmount(paymentData.amount);
-            const merchantOrderId = moment().format('x');
-            const signature = this.generateMD5Signature(
-                this.merchantCode + merchantOrderId + formattedAmount + this.apiKey
-            );
+            const merchantOrderId = moment().valueOf().toString(); // timestamp as order ID
+            const signature = this.generateSignature({
+                merchantOrderId: merchantOrderId,
+                amount: paymentData.amount
+            }, 'md5');
 
-            console.log('Creating payment request with amount:', formattedAmount);
-
-            const returnUrl = `${process.env.FRONTEND_URL}/api/payments/return`; // Gunakan endpoint API kita
-            const callbackUrl = `${process.env.FRONTEND_URL}/api/payments/callback`;
-
-            const paymentRequest = {
+            const payload = {
                 merchantCode: this.merchantCode,
-                paymentAmount: formattedAmount,
+                paymentAmount: paymentData.amount,
                 paymentMethod: paymentData.paymentMethod,
                 merchantOrderId: merchantOrderId,
                 productDetails: `Payment for ${paymentData.planName}`,
                 email: paymentData.email,
                 phoneNumber: paymentData.phoneNumber,
                 customerVaName: paymentData.customerName,
-                callbackUrl: callbackUrl,
-                returnUrl: returnUrl,
+                callbackUrl: this.callbackUrl,
+                returnUrl: this.returnUrl,
                 signature: signature,
-                expiryPeriod: 60 // 1 hour expiry
+                expiryPeriod: 60, // 1 hour
+                customerDetail: {
+                    firstName: paymentData.customerName,
+                    email: paymentData.email,
+                    phoneNumber: paymentData.phoneNumber
+                }
             };
 
-            const response = await axios.post(`${this.apiUrl}/v2/inquiry`, paymentRequest);
-            return { 
+            const response = await axios.post(`${this.baseUrl}/v2/inquiry`, payload);
+            return {
                 ...response.data,
                 merchantOrderId
             };
         } catch (error) {
-            console.error('Error creating payment request:', error.response?.data || error.message);
+            console.error('Error creating payment:', error.response?.data || error.message);
             throw error;
         }
     }
 
     async checkPaymentStatus(merchantOrderId) {
         try {
-            const signature = this.generateMD5Signature(
-                this.merchantCode + merchantOrderId + this.apiKey
-            );
-    
-            const response = await axios.post(
-                `${this.apiUrl}/transactionStatus`,
-                {
-                    merchantCode: this.merchantCode,
-                    merchantOrderId: merchantOrderId,
-                    signature: signature
-                }
-            );
-    
-            console.log('Duitku payment status:', response.data);
+            const signature = this.generateSignature({ merchantOrderId }, 'md5');
+
+            const response = await axios.post(`${this.baseUrl}/transactionStatus`, {
+                merchantCode: this.merchantCode,
+                merchantOrderId: merchantOrderId,
+                signature: signature
+            });
+
             return response.data;
         } catch (error) {
             console.error('Error checking payment status:', error.response?.data || error.message);
@@ -112,12 +141,10 @@ class PaymentService {
     }
 
     verifyCallback(callbackData) {
-        const signature = this.generateSignature(
-            callbackData.merchantCode + 
-            callbackData.amount + 
-            callbackData.merchantOrderId + 
-            this.apiKey
-        );
+        const signature = this.generateSignature({
+            merchantOrderId: callbackData.merchantOrderId,
+            amount: callbackData.amount
+        }, 'md5');
 
         return signature === callbackData.signature;
     }

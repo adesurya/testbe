@@ -2,6 +2,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
+const User = require('../models/User');
 
 class UserController {
 
@@ -176,11 +177,21 @@ class UserController {
 
     // Get all users (Admin only)
     async getAllUsers(req, res) {
+        const connection = await pool.getConnection();
         try {
-            const users = await User.getAllUsers();
-            res.json(users);
+            const [users] = await connection.query(
+                `SELECT id, username, email, role, status, created_at 
+                 FROM users 
+                 ORDER BY created_at DESC`
+            );
+            res.json({
+                success: true,
+                data: users
+            });
         } catch (error) {
             res.status(500).json({ error: error.message });
+        } finally {
+            connection.release();
         }
     }
 

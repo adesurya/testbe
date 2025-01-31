@@ -240,4 +240,10 @@ const options = {
 };
 
 const swaggerSpec = swaggerJSDoc(options);
+
+const getSwaggerJson = (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(swaggerSpec);
+};
+
 module.exports = swaggerSpec;
