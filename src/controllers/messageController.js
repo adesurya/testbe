@@ -447,48 +447,88 @@ class MessageController {
     async getMessageHistory(req, res) {
         const connection = await pool.getConnection();
         try {
-            const userId = req.user.id;
+            const userId = req.params.userId;
+            const loggedInUserId = req.user.id;
+            
+            // Validasi akses
+            if (parseInt(userId) !== loggedInUserId && req.user.role !== 'admin') {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied. You can only view your own messages.'
+                });
+            }
+    
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 10;
             const offset = (page - 1) * limit;
-
+    
+            // Get single messages
             const [messages] = await connection.query(
                 `SELECT 
-                    m.*,
-                    ws.phone_number as sender_number
-                FROM messages m
-                LEFT JOIN whatsapp_sessions ws ON m.whatsapp_session_id = ws.id
-                WHERE m.user_id = ?
-                ORDER BY m.created_at DESC
-                LIMIT ? OFFSET ?`,
-                [userId, limit, offset]
-            );
-
-            const [countResult] = await connection.query(
-                'SELECT COUNT(*) as total FROM messages WHERE user_id = ?',
+                    'single' as message_type,
+                    target_number,
+                    message,
+                    updated_at,
+                    status,
+                    created_at
+                FROM messages 
+                WHERE user_id = ?`,
                 [userId]
             );
-
+    
+            // Get bulk messages
+            const [bulkMessages] = await connection.query(
+                `SELECT 
+                    'bulk' as message_type,
+                    target_number,
+                    message,
+                    updated_at,
+                    status,
+                    created_at
+                FROM bulk_messages 
+                WHERE user_id = ?`,
+                [userId]
+            );
+    
+            // Combine and sort messages
+            const combinedMessages = [...messages, ...bulkMessages]
+                .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+    
+            // Apply pagination
+            const paginatedMessages = combinedMessages.slice(offset, offset + limit);
+    
+            // Format response
+            const formattedMessages = paginatedMessages.map(msg => ({
+                message_type: msg.message_type,
+                target_number: msg.target_number,
+                message: msg.message,
+                status: msg.status,
+                created_at: msg.created_at,
+                updated_at: msg.updated_at
+            }));
+    
             res.json({
-                status: "success",
-                data: messages,
+                success: true,
+                data: formattedMessages,
                 pagination: {
-                    total: countResult[0].total,
-                    pages: Math.ceil(countResult[0].total / limit),
-                    current: page,
-                    limit: limit
+                    total: combinedMessages.length,
+                    pages: Math.ceil(combinedMessages.length / limit),
+                    current_page: page,
+                    per_page: limit
                 }
             });
+    
         } catch (error) {
             console.error('Error getting message history:', error);
             res.status(500).json({
-                status: "error",
-                message: error.message
+                success: false,
+                error: 'Failed to retrieve message history'
             });
         } finally {
             connection.release();
         }
     }
+
     async getFormats(req, res) {
         try {
             const formats = [

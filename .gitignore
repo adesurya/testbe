@@ -1,3 +1,5 @@
 node_modules/
 src/node_modules
 whatsapp-sessions/
+.wwebjs_auth/
+.wwebjs_cache/

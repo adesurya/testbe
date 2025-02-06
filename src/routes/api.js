@@ -321,6 +321,88 @@ router.get('/messages/status/:messageId', auth, messageController.getMessageStat
  * @swagger
  * /api/messages/history/{userId}:
  *   get:
+ *     tags:
+ *       - Messages
+ *     summary: Get user's message history (both single and bulk messages)
+ *     description: Retrieves combined history of single messages and bulk messages for a user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the user
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *         default: 1
+ *         description: Page number for pagination
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         default: 10
+ *         description: Number of items per page
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved message history
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       message_type:
+ *                         type: string
+ *                         enum: [single, bulk]
+ *                       target_number:
+ *                         type: string
+ *                       message:
+ *                         type: string
+ *                       status:
+ *                         type: string
+ *                         enum: [pending, sent, failed]
+ *                       created_at:
+ *                         type: string
+ *                         format: date-time
+ *                       updated_at:
+ *                         type: string
+ *                         format: date-time
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                     pages:
+ *                       type: integer
+ *                     current_page:
+ *                       type: integer
+ *                     per_page:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized - Invalid or missing authentication token
+ *       403:
+ *         description: Forbidden - User trying to access another user's messages
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/messages/history/:userId', auth, messageController.getMessageHistory);  // Perhatikan 'messages' bukan 'message'
+
+
+/**
+ * @swagger
+ * /api/messages/history/{userId}:
+ *   get:
  *     tags: [Messages]
  *     summary: Get user message history
  *     security:
@@ -704,7 +786,79 @@ router.get('/users', auth, isAdmin, userController.getAllUsers);
  *         schema:
  *           type: integer
  */
-router.get('/users/:userId', auth, isAdmin, userController.getUserById);
+router.get('/users/:userId', auth, userController.getUserById);
+
+/**
+ * @swagger
+ * /api/users/{userId}:
+ *   get:
+ *     tags:
+ *       - Users
+ *     summary: Get user profile
+ *     description: Get detailed profile information for authenticated user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Numeric ID of the user
+ *     responses:
+ *       200:
+ *         description: User profile retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 1
+ *                     username:
+ *                       type: string
+ *                       example: "john_doe"
+ *                     email:
+ *                       type: string
+ *                       example: "john@example.com"
+ *                     role:
+ *                       type: string
+ *                       enum: [user, admin]
+ *                       example: "user"
+ *                     status:
+ *                       type: string
+ *                       enum: [active, inactive]
+ *                       example: "active"
+ *                     created_at:
+ *                       type: string
+ *                       format: date-time
+ *                     updated_at:
+ *                       type: string
+ *                       format: date-time
+ *                     profile_picture:
+ *                       type: string
+ *                       nullable: true
+ *                     oauth_provider:
+ *                       type: string
+ *                       enum: [local, google]
+ *                       example: "local"
+ *       401:
+ *         description: Unauthorized - Invalid or missing authentication token
+ *       403:
+ *         description: Forbidden - User trying to access another user's profile
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/users/:userId', auth, userController.getUserProfile); 
 
 /**
  * @swagger
@@ -737,7 +891,7 @@ router.get('/users/:userId', auth, isAdmin, userController.getUserById);
  *                 type: string
  *                 enum: [active, inactive]
  */
-router.put('/users/:userId', auth, isAdmin, userController.updateUser);
+router.put('/users/:userId', auth, userController.updateUser);
 
 /**
  * @swagger

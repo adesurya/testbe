@@ -246,6 +246,64 @@ class UserController {
             res.status(500).json({ error: error.message });
         }
     }
+
+    async getUserProfile(req, res) {
+        try {
+            const requestedUserId = parseInt(req.params.userId);
+            const loggedInUserId = req.user.id;
+            const isAdmin = req.user.role === 'admin';
+    
+            // Allow admin to view any profile, but regular users can only view their own
+            if (!isAdmin && requestedUserId !== loggedInUserId) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied. You can only view your own profile.'
+                });
+            }
+    
+            const connection = await pool.getConnection();
+            try {
+                const [user] = await connection.query(
+                    `SELECT 
+                        id,
+                        username,
+                        email,
+                        role,
+                        status,
+                        created_at,
+                        updated_at,
+                        profile_picture,
+                        oauth_provider
+                    FROM users 
+                    WHERE id = ? AND status = 'active'`,
+                    [requestedUserId]
+                );
+    
+                if (!user || user.length === 0) {
+                    return res.status(404).json({
+                        success: false,
+                        error: 'User not found'
+                    });
+                }
+    
+                const userProfile = user[0];
+                delete userProfile.password;
+    
+                res.json({
+                    success: true,
+                    data: userProfile
+                });
+            } finally {
+                connection.release();
+            }
+        } catch (error) {
+            console.error('Error in getUserProfile:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Internal server error'
+            });
+        }
+    }
 }
 
 module.exports = new UserController();

@@ -48,6 +48,54 @@ const options = {
                         }
                     }
                 },
+                UserProfile: {
+                    type: 'object',
+                    properties: {
+                        id: {
+                            type: 'integer',
+                            description: 'User ID'
+                        },
+                        username: {
+                            type: 'string',
+                            description: 'Username'
+                        },
+                        email: {
+                            type: 'string',
+                            format: 'email',
+                            description: 'User email'
+                        },
+                        role: {
+                            type: 'string',
+                            enum: ['user', 'admin'],
+                            description: 'User role'
+                        },
+                        status: {
+                            type: 'string',
+                            enum: ['active', 'inactive'],
+                            description: 'Account status'
+                        },
+                        created_at: {
+                            type: 'string',
+                            format: 'date-time',
+                            description: 'Account creation date'
+                        },
+                        updated_at: {
+                            type: 'string',
+                            format: 'date-time',
+                            description: 'Last update date'
+                        },
+                        profile_picture: {
+                            type: 'string',
+                            nullable: true,
+                            description: 'Profile picture URL'
+                        },
+                        oauth_provider: {
+                            type: 'string',
+                            enum: ['local', 'google'],
+                            description: 'Authentication provider'
+                        }
+                    }
+                },
                 WhatsappSession: {
                     type: 'object',
                     properties: {
