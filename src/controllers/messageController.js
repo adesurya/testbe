@@ -1,4 +1,5 @@
 // src/controllers/messageController.js
+const path = require('path');
 const Message = require('../models/Message');
 const WhatsappService = require('../services/whatsappService');
 const WhatsappSession = require('../models/WhatsappSession');
@@ -69,68 +70,105 @@ class MessageController {
 
     async sendMessage(req, res) {
         const connection = await pool.getConnection();
+        let messageId = null;
+        
         try {
-            const { targetNumber, message, imagePath, delay } = req.body;
-            const userId = req.user.id; // Pastikan mengambil userId dari req.user
+            const { targetNumber, message, delay } = req.body;
+            const userId = req.user.id;
     
-            console.log('Checking plan for user:', userId);
+            // Update image path handling
+            let imagePath = null;
+            if (req.file) {
+                imagePath = path.join('uploads', req.file.filename);
+                imagePath = imagePath.replace(/\\/g, '/');
+            }
+    
+            // Check user plan
             const activePlan = await this.checkUserPlan(userId);
             if (!activePlan) {
                 return res.status(400).json({
+                    success: false,
                     error: 'No active plan or insufficient messages remaining'
                 });
             }
     
-            console.log('Getting active WhatsApp sessions');
+            // Get active WhatsApp sessions
             const activeSessions = await WhatsappService.getAllActiveSessions(userId);
             if (!activeSessions || activeSessions.length === 0) {
                 return res.status(400).json({
+                    success: false,
                     error: 'No active WhatsApp sessions'
                 });
             }
     
             // Select random session
             const session = activeSessions[Math.floor(Math.random() * activeSessions.length)];
-            console.log('Selected session:', session.phone_number);
     
             try {
-                // Gunakan userId dari req.user untuk pengurangan plan
+                // Create message record first
+                const [messageResult] = await connection.query(
+                    `INSERT INTO messages 
+                    (user_id, whatsapp_session_id, target_number, message, image_path, status) 
+                    VALUES (?, ?, ?, ?, ?, 'pending')`,
+                    [userId, session.id, targetNumber, message, imagePath]
+                );
+                
+                messageId = messageResult.insertId;
+    
+                // Send message dengan messageId
                 await WhatsappService.sendMessage(
                     session.phone_number,
                     targetNumber,
                     message,
-                    userId, // Pass userId untuk decrement plan
+                    userId,
                     imagePath,
-                    delay || 0
+                    delay || 0,
+                    messageId // Pass messageId ke service
                 );
     
                 // Record success metrics
                 await Metrics.recordMessageSent(userId, session.id);
     
+                // Decrement user plan
+                await Message.decrementUserPlan(userId, 1);
+    
                 res.json({
                     success: true,
                     message: 'Message sent successfully',
                     data: {
+                        messageId,
                         sessionUsed: session.phone_number,
                         messagesRemaining: activePlan.messages_remaining - 1,
-                        planId: activePlan.id
+                        imagePath: imagePath
                     }
                 });
+    
             } catch (error) {
+                // If message record exists, update to failed
+                if (messageId) {
+                    await connection.query(
+                        'UPDATE messages SET status = "failed", updated_at = NOW() WHERE id = ?',
+                        [messageId]
+                    );
+                }
+    
                 // Record failed metrics
                 await Metrics.recordMessageFailed(userId, session.id);
                 throw error;
             }
+    
         } catch (error) {
             console.error('Error sending message:', error);
-            res.status(500).json({ 
+            res.status(500).json({
                 success: false,
-                error: error.message 
+                error: error.message
             });
         } finally {
             connection.release();
         }
     }
+    
+    
 
     async getMessageStatus(req, res) {
         try {
@@ -215,9 +253,16 @@ class MessageController {
 
     async sendBulkMessages(req, res) {
         try {
-            const { targetNumbers, message, imagePath, baseDelay = 30, intervalDelay = 10 } = req.body;
+            const { targetNumbers, message, baseDelay = 30, intervalDelay = 10 } = req.body;
             const userId = req.user.id;
-
+    
+            // Handle image upload
+            let imagePath = null;
+            if (req.file) {
+                imagePath = path.join('uploads', req.file.filename);
+                imagePath = imagePath.replace(/\\/g, '/');
+            }
+    
             // Validasi input
             if (!targetNumbers || !Array.isArray(targetNumbers) || targetNumbers.length === 0) {
                 return res.status(400).json({
@@ -225,8 +270,8 @@ class MessageController {
                     error: 'targetNumbers must be a non-empty array'
                 });
             }
-
-            // Check user plan dari table user_plans
+    
+            // Check user plan
             const activePlan = await this.checkUserPlan(userId);
             if (!activePlan) {
                 return res.status(400).json({
@@ -234,7 +279,7 @@ class MessageController {
                     error: 'No active plan found'
                 });
             }
-
+    
             if (targetNumbers.length > activePlan.messages_remaining) {
                 return res.status(400).json({
                     success: false,
@@ -245,19 +290,17 @@ class MessageController {
                     }
                 });
             }
-
-            // Get available sessions (termasuk shared)
+    
+            // Get available sessions
             const availableSessions = await WhatsappSession.findSessionsForUser(userId);
-            console.log(`Found ${availableSessions.length} available sessions for user ${userId}`);
-
             if (!availableSessions || availableSessions.length === 0) {
                 return res.status(400).json({
                     success: false,
                     error: 'No WhatsApp sessions available'
                 });
             }
-
-            // Create bulk messages record
+    
+            // Create bulk record
             const bulkResult = await Message.createBulkMessages({
                 userId,
                 targetNumbers,
@@ -265,8 +308,8 @@ class MessageController {
                 imagePath,
                 totalMessages: targetNumbers.length
             });
-
-            // Start processing
+    
+            // Start processing in background
             this.processBulkMessages({
                 bulkId: bulkResult.bulkId,
                 targetNumbers,
@@ -277,7 +320,7 @@ class MessageController {
                 availableSessions,
                 userId
             });
-
+    
             res.json({
                 success: true,
                 message: 'Bulk messages queued for sending',
@@ -293,10 +336,13 @@ class MessageController {
                     }
                 }
             });
-
+    
         } catch (error) {
             console.error('Error in sendBulkMessages:', error);
-            res.status(500).json({ error: error.message });
+            res.status(500).json({ 
+                success: false,
+                error: error.message 
+            });
         }
     }
 
@@ -315,8 +361,6 @@ class MessageController {
         console.log(`Starting bulk message process for ${targetNumbers.length} numbers`);
         let currentSessionIndex = 0;
         let failedNumbers = [];
-        
-        const formattedMessage = MessageFormatter.formatMessage(message);
     
         for (let i = 0; i < targetNumbers.length; i++) {
             const targetNumber = targetNumbers[i];
@@ -333,17 +377,17 @@ class MessageController {
                     const messageDelay = baseDelay + Math.floor(Math.random() * intervalDelay);
                     await new Promise(resolve => setTimeout(resolve, messageDelay * 1000));
                     
-                    // Send message (akan otomatis mengurangi message_remaining di user_plans)
                     await WhatsappService.sendMessage(
                         session.phone_number,
                         targetNumber,
-                        formattedMessage,
+                        message,
                         userId,
                         imagePath,
-                        0
+                        0, // delay sudah dihandle di atas
+                        null // messageId akan diupdate melalui bulk_messages
                     );
     
-                    await Message.updateBulkMessageStatus(bulkId, targetNumber, 'sent', session.id, formattedMessage, imagePath);
+                    await Message.updateBulkMessageStatus(bulkId, targetNumber, 'sent', session.id, message, imagePath);
                     sent = true;
                     console.log(`Successfully sent to ${targetNumber}`);
     
@@ -357,7 +401,7 @@ class MessageController {
                     
                     if (attempts === maxAttempts) {
                         failedNumbers.push(targetNumber);
-                        await Message.updateBulkMessageStatus(bulkId, targetNumber, 'failed', null, formattedMessage, imagePath);
+                        await Message.updateBulkMessageStatus(bulkId, targetNumber, 'failed', null, message, imagePath);
                     }
                 }
             }

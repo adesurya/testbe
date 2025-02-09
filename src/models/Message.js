@@ -159,14 +159,13 @@ class Message {
             // Create bulk record
             const [bulkResult] = await connection.query(
                 `INSERT INTO message_bulks 
-                (user_id, message, message_type, button_data, image_path, total_messages, status) 
-                VALUES (?, ?, ?, ?, ?, ?, 'processing')`,
+                (user_id, message, message_type, image_path, total_messages, status) 
+                VALUES (?, ?, ?, ?, ?, 'processing')`,
                 [
                     bulkData.userId, 
                     bulkData.message, 
                     bulkData.messageType || 'regular',
-                    bulkData.buttonData ? JSON.stringify(bulkData.buttonData) : null,
-                    bulkData.imagePath, 
+                    bulkData.imagePath,
                     bulkData.totalMessages
                 ]
             );

@@ -11,6 +11,35 @@ const adminController = require('../controllers/adminController');
 const userStatsController = require('../controllers/userStatsController'); // Add this line
 const reportController = require('../controllers/reportController');
 const authController = require('../controllers/authController')
+const multer = require('multer');
+const path = require('path');
+const {handleMulterError } = require('../config/multer');
+
+
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, 'uploads/') // Ensure this directory exists
+    },
+    filename: function (req, file, cb) {
+        cb(null, Date.now() + path.extname(file.originalname))
+    }
+});
+
+const upload = multer({ 
+    storage: storage,
+    limits: {
+        fileSize: 5 * 1024 * 1024 // 5MB limit
+    },
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Not an image! Please upload an image.'), false);
+        }
+    }
+});
+router.post('/messages/send', auth, upload.single('image'), handleMulterError, messageController.sendMessage);
+
 
 
 /**
@@ -1076,35 +1105,36 @@ router.get('/metrics', auth, isAdmin, whatsappController.getMetrics);
  * @swagger
  * /api/messages/bulk/send:
  *   post:
- *     tags: [Messages]
- *     summary: Send bulk messages to multiple recipients
+ *     tags:
+ *       - Messages
+ *     summary: Send bulk messages with optional image
+ *     description: Send messages to multiple recipients with optional image attachment
  *     security:
  *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             type: object
  *             required:
- *               - userId
  *               - targetNumbers
  *               - message
  *             properties:
- *               userId:
- *                 type: string
- *                 description: ID of the user sending messages
  *               targetNumbers:
  *                 type: array
  *                 items:
  *                   type: string
- *                 description: Array of phone numbers to send messages to
+ *                 description: Array of target phone numbers
+ *                 example: ["628123456789", "628234567890"]
  *               message:
  *                 type: string
- *                 description: Message content
- *               imagePath:
+ *                 description: Message content, supports formatting and emojis
+ *                 example: "**Hello!** :smile:\n__This is a test message__"
+ *               image:
  *                 type: string
- *                 description: Optional path to image file
+ *                 format: binary
+ *                 description: Optional image file (PNG, JPG, JPEG, max 5MB)
  *               baseDelay:
  *                 type: integer
  *                 description: Base delay between messages in seconds
@@ -1113,33 +1143,66 @@ router.get('/metrics', auth, isAdmin, whatsappController.getMetrics);
  *                 type: integer
  *                 description: Random additional delay in seconds
  *                 default: 10
- *             example:
- *               userId: "123"
- *               targetNumbers: ["628123456789", "628234567890"]
- *               message: "Hello, this is a bulk message"
- *               baseDelay: 30
- *               intervalDelay: 10
  *     responses:
  *       200:
- *         description: Bulk messages queued successfully
+ *         description: Messages queued successfully
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 bulkId:
- *                   type: integer
- *                   example: 1
- *                 totalMessages:
- *                   type: integer
- *                   example: 2
- *                 estimatedTimeMinutes:
- *                   type: integer
- *                   example: 5
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Bulk messages queued for sending"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     bulkId:
+ *                       type: integer
+ *                       example: 123
+ *                     totalMessages:
+ *                       type: integer
+ *                       example: 2
+ *                     activeSessionsCount:
+ *                       type: integer
+ *                       example: 1
+ *                     estimatedTimeMinutes:
+ *                       type: integer
+ *                       example: 2
+ *                     planDetails:
+ *                       type: object
+ *                       properties:
+ *                         planId:
+ *                           type: integer
+ *                           example: 1
+ *                         messagesRemaining:
+ *                           type: integer
+ *                           example: 98
+ *                         endDate:
+ *                           type: string
+ *                           format: date-time
  *       400:
  *         description: Invalid request parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "targetNumbers must be a non-empty array"
  *       401:
- *         description: Unauthorized
+ *         description: Unauthorized - Invalid or missing token
+ *       413:
+ *         description: File too large
+ *       415:
+ *         description: Unsupported file type
  *       500:
  *         description: Server error
  * 
@@ -2303,7 +2366,13 @@ router.get('/payments/status/:merchantOrderId', auth, paymentController.checkTra
 router.get('/payments/poll/:merchantOrderId', auth, paymentController.pollTransactionStatus);
 
 // Route implementation
-router.post('/messages/bulk/send', auth, messageController.sendBulkMessages);
+router.post('/messages/bulk/send',
+    auth,
+    upload.single('image'),
+    handleMulterError,
+    messageController.sendBulkMessages
+);
+
 router.get('/messages/bulk/:bulkId/status', auth, messageController.getBulkStatus);
 router.get('/messages/bulk/history', auth, messageController.getBulkHistory);
 

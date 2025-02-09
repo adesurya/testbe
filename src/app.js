@@ -8,7 +8,13 @@ const WhatsappService = require('./services/whatsappService');
 const CleanupService = require('./services/cleanupService');
 const { swaggerSpec, getSwaggerJson } = require('./config/swagger');
 const path = require('path');
+const fs = require('fs');
+const uploadDir = path.join(__dirname, '..', 'uploads');
 
+
+if (!fs.existsSync(uploadDir)){
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
 require('dotenv').config();
 
 const app = express();
@@ -32,6 +38,7 @@ app.use(express.json({
 
 // API Routes
 app.use('/api', apiRoutes);
+app.use('/uploads', express.static(uploadDir));
 
 const swaggerOptions = {
     definition: {
@@ -62,12 +69,13 @@ app.get('/api-docs/swagger.json', (req, res) => {
 
 // Error handling
 app.use((err, req, res, next) => {
-    console.error('Global error handler:', err);
-    res.status(err.status || 500).json({
-        success: false,
-        error: err.message || 'Internal Server Error',
-        details: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
+    if (err instanceof multer.MulterError) {
+        return res.status(400).json({
+            success: false,
+            error: err.message
+        });
+    }
+    next(err);
 });
 
 const server = app.listen(process.env.PORT || 3000, () => {

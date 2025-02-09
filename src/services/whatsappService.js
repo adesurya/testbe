@@ -580,7 +580,7 @@ class WhatsappService {
         return client.info !== null && client.info !== undefined;
     }
 
-    async sendMessage(sessionPhone, targetNumber, message, userId, imagePath = null, delay = 0) {
+    async sendMessage(sessionPhone, targetNumber, message, userId, imagePath = null, delay = 0, messageId = null) {
         console.log(`Attempting to send message to ${targetNumber} using ${sessionPhone}`);
         let client = this.sessions.get(sessionPhone);
     
@@ -603,31 +603,6 @@ class WhatsappService {
                 throw new Error(`Number ${targetNumber} is not registered on WhatsApp`);
             }
     
-            // Get WhatsApp session ID
-            const [sessions] = await connection.query(
-                'SELECT id FROM whatsapp_sessions WHERE phone_number = ?',
-                [sessionPhone]
-            );
-    
-            if (!sessions || sessions.length === 0) {
-                throw new Error('WhatsApp session not found in database');
-            }
-    
-            const sessionId = sessions[0].id;
-    
-            // Create message record first with pending status
-            const [messageResult] = await connection.query(
-                `INSERT INTO messages 
-                (user_id, whatsapp_session_id, target_number, message, image_path, status) 
-                VALUES (?, ?, ?, ?, ?, 'pending')`,
-                [userId, sessionId, targetNumber, message, imagePath]
-            );
-    
-            const messageId = messageResult.insertId;
-    
-            // Decrement message count
-            await Message.decrementUserPlan(userId, 1);
-    
             // Format pesan dengan emoji jika ada
             const formattedMessage = this.convertEmojiCodes(message);
     
@@ -636,7 +611,10 @@ class WhatsappService {
                 console.log(`Sending message with image: ${imagePath}`);
                 try {
                     const MessageMedia = require('whatsapp-web.js').MessageMedia;
-                    const media = await MessageMedia.fromFilePath(imagePath);
+                    const absolutePath = path.join(process.cwd(), imagePath.replace(/^\//, ''));
+                    console.log('Absolute image path:', absolutePath);
+                    
+                    const media = await MessageMedia.fromFilePath(absolutePath);
                     await client.sendMessage(fullNumber, media, {
                         caption: formattedMessage
                     });
@@ -648,23 +626,17 @@ class WhatsappService {
                 await client.sendMessage(fullNumber, formattedMessage);
             }
     
-            // Update message status to sent
-            await connection.query(
-                'UPDATE messages SET status = ?, updated_at = NOW() WHERE id = ?',
-                ['sent', messageId]
-            );
+            // Update message status jika messageId tersedia
+            if (messageId) {
+                await connection.query(
+                    'UPDATE messages SET status = ?, updated_at = NOW() WHERE id = ?',
+                    ['sent', messageId]
+                );
+            }
     
             console.log(`Message sent successfully to ${targetNumber}`);
             return true;
         } catch (error) {
-            // If there's a message record, update it to failed
-            if (messageId) {
-                await connection.query(
-                    'UPDATE messages SET status = ?, updated_at = NOW() WHERE id = ?',
-                    ['failed', messageId]
-                );
-            }
-    
             console.error(`Error sending message:`, error);
             throw error;
         } finally {
